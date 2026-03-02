@@ -9,49 +9,71 @@ define('GRAFANA_BASE_URL',
        'https://monit-grafana.cern.ch/d/RwtmMDXmz/host-metrics-simple?from=now-7d&orgId=1&to=now&var-availability_zone=All&var-bin=$__auto_interval_bin&var-environment=All&var-rp=one_week&var-hostname=');
 
 $machines = [];
+# Ironic Machines
 $machines["fcc-ironic-01.cern.ch"] = [
-    "machine" => "OFF",
+    "power-state" => "OFF",
     "monitoring" => "grafana",
+    # One needs to already have correct project selected, in order for this link
+    # to work
+    "admin" => "https://openstack.cern.ch/auth/switch/2d4dd51d-4aaf-46ea-aa47-07c865c9c6f1/?next=/project/dc9ddf39-e777-483b-b8d6-fb85db80aa79/",
 ];
 $machines["fcc-ironic-02.cern.ch"] = [
-    "machine" => "OFF",
+    "power-state" => "OFF",
     "monitoring" => "grafana",
+    "admin" => "https://openstack.cern.ch/auth/switch/2d4dd51d-4aaf-46ea-aa47-07c865c9c6f1/?next=/project/dac3de87-f597-4949-8bce-af5060137e37/",
 ];
 $machines["fcc-ironic-03.cern.ch"] = [
-    "machine" => "OFF",
+    "power-state" => "OFF",
     "monitoring" => "grafana",
-];
-$machines["fcc-gpu-01.cern.ch"] = ["machine" => "OFF", "monitoring" => "OFF"];
-$machines["fcc-gpu-02.cern.ch"] = ["machine" => "OFF", "monitoring" => "OFF"];
-$machines["fcc-gpu-03.cern.ch"] = ["machine" => "OFF", "monitoring" => "OFF"];
-$machines["fcc-gpu-04.cern.ch"] = [
-    "machine" => "OFF",
-    "monitoring" => "grafana"
-];
-$machines["fcc-gpu-05.cern.ch"] = [
-    "machine" => "OFF",
-    "monitoring" => "grafana"
+    "admin" => "https://openstack.cern.ch/auth/switch/2d4dd51d-4aaf-46ea-aa47-07c865c9c6f1/?next=/project/2c0ad3e3-04d3-4edf-acb4-d0da77e030e8/",
 ];
 
-foreach ($machines as $machine => &$status) {
+# GPU Machines
+$machines["fcc-gpu-01.cern.ch"] = [
+  "power-state" => "OFF",
+  "monitoring" => "OFF",
+  "admin" => "https://openstack.cern.ch/auth/switch/90800691-e1ae-4270-b0b2-3592289d1439/?next=/project/fcebc008-1ab1-483f-869d-4f942e2ea0bc/"
+];
+$machines["fcc-gpu-02.cern.ch"] = [
+  "power-state" => "OFF",
+  "monitoring" => "OFF",
+  "admin" => "https://openstack.cern.ch/auth/switch/90800691-e1ae-4270-b0b2-3592289d1439/?next=/project/68edb32a-42ea-4ebc-a27a-ef8da5c6b602/"
+];
+$machines["fcc-gpu-03.cern.ch"] = [
+  "power-state" => "OFF",
+  "monitoring" => "OFF",
+  "admin" => "https://openstack.cern.ch/auth/switch/90800691-e1ae-4270-b0b2-3592289d1439/?next=/project/cbe8043f-03a9-445e-8574-2406f8ccff71/"
+];
+$machines["fcc-gpu-04.cern.ch"] = [
+    "power-state" => "OFF",
+    "monitoring" => "grafana",
+    "admin" => "https://openstack.cern.ch/auth/switch/90800691-e1ae-4270-b0b2-3592289d1439/?next=/project/253a8903-0cd3-484e-8023-e0124a5f8ead/"
+];
+$machines["fcc-gpu-05.cern.ch"] = [
+    "power-state" => "OFF",
+    "monitoring" => "grafana",
+    "admin" => "https://openstack.cern.ch/auth/switch/90800691-e1ae-4270-b0b2-3592289d1439/?next=/project/b022d298-a9fc-4b53-8815-face01735caa/"
+];
+
+foreach ($machines as $machine_name => &$info) {
     // Check if ping works
     // TODO: Using raw ping executable, ATM `SNMP Class` is not available at the
     // CERN hosting
-    // $session = new SNMP(SNMP::VERSION_2c, $machine, 'boguscommunity');
+    // $session = new SNMP(SNMP::VERSION_2c, $machine_name, 'boguscommunity');
     // if ($session->getError()) {
-    //   $status['machine'] = 'OFF';
+    //   $info['power-state'] = 'OFF';
     // } else {
-    //   $status['machine'] = 'ON';
+    //   $info['power-state'] = 'ON';
     // }
 
-    $ping = exec("timeout 0.2 ping -c 1 -t 64 " . $machine);
+    $ping = exec("timeout 0.2 ping -c 1 -t 64 " . $machine_name);
     if (empty($ping)) {
-        $status["machine"] = "OFF";
+        $info["power-state"] = "OFF";
     } else {
-        $status["machine"] = "ON";
+        $info["power-state"] = "ON";
     }
 }
-unset($status);
+unset($info);
 ?>
 
 <!doctype html>
@@ -74,7 +96,7 @@ unset($status);
       <div class="row">
         <div class="col-lg">
           <div class="text-bg-light rounded p-3 mt-3 pl-lg-5">
-            <h2>Ironic machines</h2>
+            <h2>Ironic Machines</h2>
 
             <?php print_list($machines, 'ironic'); ?>
           </div>
@@ -82,7 +104,7 @@ unset($status);
 
         <div class="col-lg">
           <div class="text-bg-light rounded p-3 mt-3">
-            <h2>GPU machines</h2>
+            <h2>GPU Machines</h2>
 
             <?php print_list($machines, 'gpu'); ?>
           </div>
@@ -99,30 +121,40 @@ unset($status);
 
 function print_list($machines, $machine_type) {
   echo '<ul>' . PHP_EOL;
-  foreach ($machines as $machine => $status) {
-    if (str_contains($machine, $machine_type)) {
+  foreach ($machines as $machine_name => $info) {
+    if (str_contains($machine_name, $machine_type)) {
       echo '  <li class="mb-3">' . PHP_EOL;
-      echo '    <code>' . $machine . '</code>:' . PHP_EOL;
+      echo '    <code>' . $machine_name . '</code>:' . PHP_EOL;
       echo '    <ul>' . PHP_EOL;
       echo '      <li>' . PHP_EOL;
       echo '        <span class="badge text-bg-'
-        . (($status["machine"] == "ON") ? "success" : "danger")
+        . (($info["power-state"] == "ON") ? "success" : "danger")
         . '">'
-        . $status["machine"]
-        . '</span> Power state<br>'
+        . $info["power-state"]
+        . '</span> Power state'
         . PHP_EOL;
-      if ($status['monitoring'] == 'grafana') {
+      echo '      </li>' . PHP_EOL;
+      echo '      <li>' . PHP_EOL;
+      if ($info['monitoring'] == 'grafana') {
         echo '        <span class="badge text-bg-success">'
           . '<i class="bi bi-graph-up"></i></span> '
           . '<a href="'
           . GRAFANA_BASE_URL
-          . $machine
+          . $machine_name
           . '" target="_link">Monitoring</a>'
           . PHP_EOL;
       } else {
         echo '        <span class="badge text-bg-danger">OFF</span> Monitoring'
           . PHP_EOL;
       }
+      echo '      </li>' . PHP_EOL;
+      echo '      <li>' . PHP_EOL;
+      echo '        <span class="badge text-bg-success">'
+        . '<i class="bi bi-gear-fill"></i></span> '
+        . '<a href="'
+        . $info["admin"]
+        . '" target="_link">Administration</a>'
+        . PHP_EOL;
       echo '      </li>' . PHP_EOL;
       echo '    </ul>' . PHP_EOL;
       echo '  </li>' . PHP_EOL;
