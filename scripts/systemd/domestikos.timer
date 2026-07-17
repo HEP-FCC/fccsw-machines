@@ -1,0 +1,9 @@
+[Unit]
+Description=Periodically run domestikos check (GPU compute mode + excubitor-bypass detection)
+
+[Timer]
+OnBootSec=1min
+OnUnitActiveSec=5min
+
+[Install]
+WantedBy=timers.target

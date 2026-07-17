@@ -1,0 +1,7 @@
+[Unit]
+Description=domestikos: enforce GPU EXCLUSIVE_PROCESS mode and check for excubitor-bypass usage
+After=multi-user.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/domestikos check

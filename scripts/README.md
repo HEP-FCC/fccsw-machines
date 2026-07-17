@@ -8,13 +8,14 @@ A cooperative lock manager for a shared multi-GPU node, split into a user
 command and an admin command:
 
 - **`excubitor`** — run by anyone. `run`, `status`, `release`.
-- **`domestikos`** — run by an admin (root). `gc`, `status`.
+- **`domestikos`** — run by an admin (root). `gc`, `status`, `check`, `offenders`.
 
 This is COOPERATIVE only: it stops nothing at the kernel/driver level. It
 only works if everyone uses `excubitor run` instead of launching CUDA jobs
 directly. `make install` also sets up `nvidia-smi -c EXCLUSIVE_PROCESS` as
 a hard backstop (see below) so a forgotten lock causes a crash instead of
-silent corruption.
+silent corruption, and runs `domestikos check` periodically to catch and
+log anyone who bypasses `excubitor` anyway.
 
 ### Installation (AlmaLinux 9 GPU nodes)
 
@@ -44,14 +45,24 @@ so without it the directory would vanish on reboot and `excubitor` would
 refuse to run until someone reinstalled by hand. `excubitor` refuses to
 run until this has been done at least once.
 
-`make install` also installs and enables
-`systemd/nvidia-exclusive-process.service`, which runs `nvidia-smi -c
-EXCLUSIVE_PROCESS` once now and again on every future boot (GPU compute
-mode, like the lock dir, resets on reboot and isn't backed by any file
-that would otherwise survive it). Enabling can fail if a GPU already has
-a running process on it — `make install` warns rather than aborting in
-that case; re-run `systemctl restart nvidia-exclusive-process.service`
-once idle.
+`make install` also installs `systemd/domestikos.service` +
+`systemd/domestikos.timer` and starts the timer, which runs `domestikos
+check` once now, again ~1 minute after every boot, and every 5 minutes
+after that. Each run does two things:
+
+- best-effort (re-)assert `nvidia-smi -c EXCLUSIVE_PROCESS` (GPU compute
+  mode, like the lock dir, resets on reboot and isn't backed by any file
+  that would otherwise survive it) — silently, since this normally fails
+  once any GPU has an active process, which is the steady state after the
+  first successful run;
+- check every GPU `excubitor` considers free for actual driver-visible
+  usage, and log a `WARN` line (visible via `journalctl -u
+  domestikos.service`) for any bypass found.
+
+The very first run happens synchronously during `make install`; if it
+fails (e.g. a GPU is already in use), `make install` warns rather than
+aborting — it'll succeed automatically once idle, either on the next
+timer tick or via `systemctl start domestikos.service`.
 
 To update after a `git pull`, re-run `sudo make -C ~/fccsw-machines/scripts
 install` — the installed copies don't update themselves.
@@ -61,10 +72,10 @@ install` — the installed copies don't update themselves.
 who logs into the node interactively.
 
 To remove: `sudo make -C ~/fccsw-machines/scripts uninstall`. This removes
-the installed commands, the tmpfiles.d rule, the systemd unit, and the
-login banner, but leaves the lock directory and the GPU's current compute
-mode in place — the latter reverts to the driver default only on the next
-reboot, since the unit that re-applies it is gone.
+the installed commands, the tmpfiles.d rule, the systemd service and
+timer, and the login banner, but leaves the lock directory and the GPU's
+current compute mode in place — the latter reverts to the driver default
+only on the next reboot, since the timer that re-applies it is gone.
 
 Both `PREFIX` (default `/usr/local`) and `BINDIR`/`LIBEXECDIR` can be
 overridden, e.g. `make install PREFIX=/opt`.
@@ -101,6 +112,20 @@ Force-clears stale lock/meta files left behind by crashed jobs, regardless
 of which user owned them (a regular user's `excubitor status` can only
 clean up its own). This never touches a lock still held by a live process —
 there is no force-eviction of running jobs.
+
+`domestikos check` is what `domestikos.timer` runs periodically (see
+Installation above); it can also be run by hand any time to force an
+immediate re-check.
+
+```
+domestikos offenders               # bypass warnings from the last 24h
+domestikos offenders "1 hour ago"  # or any journalctl --since value
+```
+
+Shows `check`'s `UNTRACKED`/bypass warnings pulled from the systemd
+journal, so you don't have to hand-roll the `journalctl -u
+domestikos.service` query yourself. Doesn't require root (though
+`domestikos` as a whole is meant to be run as one).
 
 ### Support
 

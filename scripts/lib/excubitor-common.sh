@@ -28,18 +28,21 @@ gpu_ids() {
 is_locked() {
     local gpu="$1"
     local lf; lf="$(lock_file "$gpu")"
-    # try a non-blocking exclusive probe: if we can grab it, it was free
-    if command -v flock >/dev/null; then
-        exec {fd}>"$lf" 2>/dev/null || return 1
+    command -v flock >/dev/null || return 1
+    # Run the whole probe in a subshell: a bare `exec {fd}>... 2>/dev/null`
+    # modifies the CURRENT shell's fd table persistently (not just this
+    # line), which would silently redirect the rest of the caller's
+    # stderr to /dev/null for the remainder of the process. Scoping it to
+    # a subshell confines that entirely to the subshell, which exits
+    # immediately after.
+    (
+        exec {fd}>"$lf" || exit 1
         if flock -n -x "$fd"; then
-            flock -u "$fd"
-            exec {fd}>&-
-            return 1   # not locked
+            exit 1   # got the lock -> it was NOT locked
         else
-            exec {fd}>&-
-            return 0   # locked
+            exit 0   # could not get it -> it IS locked
         fi
-    fi
+    ) 2>/dev/null
 }
 
 # Best-effort: a regular user can only remove meta files they own, since

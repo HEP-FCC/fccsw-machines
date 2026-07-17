@@ -5,18 +5,24 @@
 # Named after the Domestikos ton Exkoubiton, the Byzantine officer who
 # commanded the excubitores palace guard.
 #
-# Must be run as root. Owns the one thing a regular user cannot do:
-# force-clearing another user's stale (dead-process) lock/meta files,
-# which the sticky bit on LOCK_DIR otherwise blocks. It never touches a
-# lock still held by a live process -- there is no force-eviction of
-# running jobs, only cleanup of already-dead ones.
+# Must be run as root. Owns the things a regular user cannot do:
+#   - force-clearing another user's stale (dead-process) lock/meta files,
+#     which the sticky bit on LOCK_DIR otherwise blocks (never touches a
+#     lock still held by a live process -- no force-eviction of running
+#     jobs, only cleanup of already-dead ones), and
+#   - enforcing GPU compute mode and checking for excubitor-bypass usage
+#     (see `check`), run periodically by domestikos.timer.
 #
 # LOCK_DIR provisioning is handled by `make install` (see
 # tmpfiles.d/excubitor.conf), not by this script.
 #
 # Usage:
-#   domestikos gc        # force-clear stale locks/meta, any user
-#   domestikos status    # same view as `excubitor status`
+#   domestikos gc                  # force-clear stale locks/meta, any user
+#   domestikos status               # same view as `excubitor status`
+#   domestikos check                # enforce EXCLUSIVE_PROCESS + log bypass usage
+#                                   # (used by domestikos.timer; safe to run by hand)
+#   domestikos offenders [<since>]  # show `check`'s bypass warnings from the
+#                                   # journal (default: last 24h)
 #
 set -euo pipefail
 
@@ -50,11 +56,42 @@ cmd_status() {
     status
 }
 
+cmd_check() {
+    require_root
+    require_lock_dir
+
+    # Best-effort, silent: re-asserting the same mode fails whenever a GPU
+    # already has an active context, which is the normal steady state once
+    # it's been set once -- only the very first application (at install
+    # time, surfaced by `make install`) is worth flagging if it fails.
+    if command -v nvidia-smi >/dev/null 2>&1; then
+        nvidia-smi -c EXCLUSIVE_PROCESS >/dev/null 2>&1 || true
+    fi
+
+    for gpu in $(gpu_ids); do
+        if ! is_locked "$gpu"; then
+            local bypass_pids; bypass_pids="$(untracked_pids "$gpu")" || true
+            if [[ -n "$bypass_pids" ]]; then
+                local bypass_users; bypass_users="$(untracked_owners "$bypass_pids")" || true
+                echo "WARN: GPU ${gpu} has untracked usage -- user(s)=${bypass_users} pid(s)=${bypass_pids}" >&2
+            fi
+        fi
+    done
+}
+
+cmd_offenders() {
+    local since="${1:-24 hours ago}"
+    # journalctl itself exits 1 when nothing matched -- not a real error.
+    journalctl -u domestikos.service --since "${since}" -g "untracked usage" --no-pager || true
+}
+
 case "${1:-}" in
     gc) cmd_gc ;;
     status) cmd_status ;;
+    check) cmd_check ;;
+    offenders) shift; cmd_offenders "$@" ;;
     *)
-        echo "usage: domestikos {gc|status}" >&2
+        echo "usage: domestikos {gc|status|check|offenders [<since>]}" >&2
         exit 1
         ;;
 esac
