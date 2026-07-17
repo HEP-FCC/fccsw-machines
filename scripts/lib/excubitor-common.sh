@@ -5,7 +5,18 @@
 # directly -- it is sourced by both.
 
 LOCK_DIR="/var/lock/excubitor"
-NUM_GPUS_TOTAL="${EXCUBITOR_GPU_TOTAL:-4}"
+
+# Prefer an explicit override; otherwise detect the real GPU count so the
+# same install works unmodified across hosts with different GPU counts
+# (e.g. 4x A100 vs. Tesla T4 boxes). Falls back to 4 if nvidia-smi isn't
+# available (e.g. running this off-node for testing).
+if [[ -n "${EXCUBITOR_GPU_TOTAL:-}" ]]; then
+    NUM_GPUS_TOTAL="$EXCUBITOR_GPU_TOTAL"
+elif command -v nvidia-smi >/dev/null 2>&1 && [[ "$(nvidia-smi -L 2>/dev/null | wc -l)" -gt 0 ]]; then
+    NUM_GPUS_TOTAL="$(nvidia-smi -L | wc -l)"
+else
+    NUM_GPUS_TOTAL=4
+fi
 
 lock_file() { echo "${LOCK_DIR}/gpu${1}.lock"; }
 meta_file() { echo "${LOCK_DIR}/gpu${1}.meta"; }

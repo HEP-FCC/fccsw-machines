@@ -19,7 +19,7 @@
 #
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 # shellcheck source=lib/excubitor-common.sh
 source "${SCRIPT_DIR}/lib/excubitor-common.sh"
 
@@ -35,6 +35,14 @@ cmd_init() {
     mkdir -p "$LOCK_DIR"
     chmod 1777 "$LOCK_DIR"   # sticky, world-writable so any user can create/hold locks
     echo "[domestikos] ${LOCK_DIR} ready (mode 1777)"
+
+    # /var/lock is a tmpfs (symlinked to /run/lock on AlmaLinux/RHEL), so
+    # LOCK_DIR is wiped on every reboot. Drop a tmpfiles.d rule so systemd
+    # recreates it automatically at boot instead of requiring a manual
+    # re-init after every reboot.
+    local tmpfiles_conf="/etc/tmpfiles.d/excubitor.conf"
+    echo "d ${LOCK_DIR} 1777 root root -" > "$tmpfiles_conf"
+    echo "[domestikos] wrote ${tmpfiles_conf} (recreates ${LOCK_DIR} on every boot)"
 }
 
 cmd_gc() {
