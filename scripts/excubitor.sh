@@ -80,23 +80,24 @@ status() {
     done
 }
 
-# Try to acquire exactly $1 GPUs. On success, prints a space-separated
-# list of GPU ids to stdout and leaves fds open (via global FDS array)
-# held by the caller for the lifetime of the process.
+# Try to acquire exactly $1 GPUs. MUST be called directly (never via
+# command substitution / a pipeline) -- it must run in the caller's own
+# shell process, not a subshell, because the held fds (and thus the
+# flock locks) are released the instant the process holding them exits.
+# On success, leaves the held gpu ids/fds in the global HELD_GPUS/HELD_FDS
+# arrays for the caller to hold for the lifetime of the process.
 declare -a HELD_FDS=()
 declare -a HELD_GPUS=()
 
 acquire_n() {
     local n="$1"
     local timeout="$2"
-    local got=()
     local deadline=0
     if [[ "$timeout" -gt 0 ]]; then
         deadline=$(( $(date +%s) + timeout ))
     fi
 
     while true; do
-        got=()
         HELD_FDS=()
         HELD_GPUS=()
         for gpu in $(gpu_ids); do
@@ -105,19 +106,13 @@ acquire_n() {
             if flock -n -x "$fd"; then
                 HELD_FDS+=("$fd")
                 HELD_GPUS+=("$gpu")
-                got+=("$gpu")
-                if [[ "${#got[@]}" -eq "$n" ]]; then
-                    break
+                if [[ "${#HELD_GPUS[@]}" -eq "$n" ]]; then
+                    return 0
                 fi
             else
                 exec {fd}>&-
             fi
         done
-
-        if [[ "${#got[@]}" -eq "$n" ]]; then
-            echo "${got[@]}"
-            return 0
-        fi
 
         # not enough free GPUs right now: release what we grabbed, wait, retry
         for fd in "${HELD_FDS[@]}"; do
@@ -185,22 +180,25 @@ cmd_run() {
         exit 1
     fi
 
-    local gpus
-    gpus=$(acquire_n "$n" "$timeout") || exit 1
-    read -r -a gpu_arr <<< "$gpus"
+    acquire_n "$n" "$timeout" || exit 1
+    local gpu_arr=("${HELD_GPUS[@]}")
 
     for gpu in "${gpu_arr[@]}"; do
         write_meta "$gpu" "$*"
     done
 
-    local cvd
+    # not `local`: still read by cleanup() when it runs as the EXIT trap,
+    # by which point cmd_run has already returned and its locals are gone.
     cvd=$(IFS=,; echo "${gpu_arr[*]}")
     echo "[excubitor] acquired GPU(s): ${cvd}  (user=${USER} pid=$$)"
 
     cleanup() {
         for fd in "${HELD_FDS[@]}"; do
             flock -u "$fd" 2>/dev/null || true
-            exec {fd}>&- 2>/dev/null || true
+            # NB: fd was opened in acquire_n()'s scope, not this nested
+            # function's -- bash's `exec {fd}>&-` name-tracking only works
+            # within the scope that opened it, so close by number via eval.
+            eval "exec ${fd}>&-" 2>/dev/null || true
         done
         for gpu in "${HELD_GPUS[@]}"; do
             clear_meta "$gpu"
