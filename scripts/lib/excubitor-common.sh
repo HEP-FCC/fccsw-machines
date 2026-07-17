@@ -6,16 +6,18 @@
 
 LOCK_DIR="/var/lock/excubitor"
 
-# Prefer an explicit override; otherwise detect the real GPU count so the
-# same install works unmodified across hosts with different GPU counts
-# (e.g. 4x A100 vs. Tesla T4 boxes). Falls back to 4 if nvidia-smi isn't
-# available (e.g. running this off-node for testing).
-if [[ -n "${EXCUBITOR_GPU_TOTAL:-}" ]]; then
-    NUM_GPUS_TOTAL="$EXCUBITOR_GPU_TOTAL"
-elif command -v nvidia-smi >/dev/null 2>&1 && [[ "$(nvidia-smi -L 2>/dev/null | wc -l)" -gt 0 ]]; then
-    NUM_GPUS_TOTAL="$(nvidia-smi -L | wc -l)"
+# Always detect the real GPU count so the same install works unmodified
+# across hosts with different GPU counts (e.g. 4x A100 vs. Tesla T4
+# boxes). Deliberately not overridable by an unprivileged excubitor
+# invocation -- how many GPUs a node has is a fact about the node, not
+# something a regular user's own environment should be able to
+# misrepresent. 0 here means "unknown/none detected"; require_gpu_count
+# below is what turns that into a hard error for the commands that need
+# it, rather than silently pretending a plausible-sounding count.
+if command -v nvidia-smi >/dev/null 2>&1; then
+    NUM_GPUS_TOTAL="$(nvidia-smi -L 2>/dev/null | wc -l)"
 else
-    NUM_GPUS_TOTAL=4
+    NUM_GPUS_TOTAL=0
 fi
 
 lock_file() { echo "${LOCK_DIR}/gpu${1}.lock"; }
@@ -122,6 +124,16 @@ status() {
 require_lock_dir() {
     if [[ ! -d "$LOCK_DIR" ]]; then
         echo "ERROR: ${LOCK_DIR} does not exist -- contact the administrators on Mattermost, \"FCC SW Machines\": https://mattermost.web.cern.ch/fccsw/channels/fccsw-machines" >&2
+        exit 1
+    fi
+}
+
+# Must be called directly, never via `$(...)` -- that would fork a
+# subshell and the `exit` below would only ever terminate the subshell,
+# silently letting the caller carry on as if nothing were wrong.
+require_gpu_count() {
+    if [[ "$NUM_GPUS_TOTAL" -eq 0 ]]; then
+        echo "ERROR: no GPUs detected on this node -- is nvidia-smi installed and working?" >&2
         exit 1
     fi
 }

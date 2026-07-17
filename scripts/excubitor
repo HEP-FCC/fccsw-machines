@@ -32,6 +32,7 @@ source "${SCRIPT_DIR}/lib/excubitor-common.sh"
 DEFAULT_TIMEOUT=0   # 0 = wait forever
 
 require_lock_dir
+require_gpu_count
 
 # ---- locking -------------------------------------------------------------
 
@@ -126,7 +127,7 @@ cmd_run() {
         exit 1
     fi
     if [[ "$n" -gt "$NUM_GPUS_TOTAL" ]]; then
-        echo "ERROR: requested ${n} GPU(s) but only ${NUM_GPUS_TOTAL} are configured (set EXCUBITOR_GPU_TOTAL to override)" >&2
+        echo "ERROR: requested ${n} GPU(s) but this node only has ${NUM_GPUS_TOTAL}" >&2
         exit 1
     fi
 

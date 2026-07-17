@@ -93,8 +93,10 @@ excubitor run -n 1 -- python train.py
 excubitor run -n 2 -t 600 -- python train_multi.py
 ```
 
-Set `EXCUBITOR_GPU_TOTAL` to override the auto-detected GPU count, e.g. to
-reserve one GPU for something else.
+The GPU count is always auto-detected via `nvidia-smi -L` and isn't
+overridable by a regular user -- how many GPUs a node has is a fact about
+the node, not something an individual `excubitor` invocation should be
+able to misrepresent.
 
 `status` also cross-checks against `nvidia-smi --query-compute-apps` and
 flags a GPU as `UNTRACKED` (with the owning user and PID(s), via `ps`) if

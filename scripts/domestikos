@@ -40,6 +40,7 @@ require_root() {
 cmd_gc() {
     require_root
     require_lock_dir
+    require_gpu_count
     local cleared=0
     for gpu in $(gpu_ids); do
         local mf; mf="$(meta_file "$gpu")"
@@ -53,12 +54,14 @@ cmd_gc() {
 
 cmd_status() {
     require_lock_dir
+    require_gpu_count
     status
 }
 
 cmd_check() {
     require_root
     require_lock_dir
+    require_gpu_count
 
     # Best-effort, silent: re-asserting the same mode fails whenever a GPU
     # already has an active context, which is the normal steady state once
