@@ -2,6 +2,8 @@ PREFIX ?= /usr/local
 BINDIR ?= $(PREFIX)/bin
 LIBEXECDIR ?= $(PREFIX)/libexec/excubitor
 TMPFILES_CONF ?= /etc/tmpfiles.d/excubitor.conf
+SYSTEMD_UNIT_DIR ?= /etc/systemd/system
+SYSTEMD_UNIT := nvidia-exclusive-process.service
 LOCK_DIR ?= /var/lock/excubitor
 
 SCRIPT_DIR := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
@@ -19,9 +21,16 @@ install:
 	ln -sf $(LIBEXECDIR)/excubitor $(BINDIR)/excubitor
 	ln -sf $(LIBEXECDIR)/domestikos $(BINDIR)/domestikos
 	$(BINDIR)/domestikos init
+	install -m 644 $(SCRIPT_DIR)/systemd/$(SYSTEMD_UNIT) $(SYSTEMD_UNIT_DIR)/$(SYSTEMD_UNIT)
+	systemctl daemon-reload
+	systemctl enable --now $(SYSTEMD_UNIT) || echo "WARN: failed to enable $(SYSTEMD_UNIT) -- likely a GPU is currently in use; retry with 'systemctl restart $(SYSTEMD_UNIT)' once idle" >&2
 
 uninstall:
 	rm -f $(BINDIR)/excubitor $(BINDIR)/domestikos
 	rm -rf $(LIBEXECDIR)
 	rm -f $(TMPFILES_CONF)
+	systemctl disable --now $(SYSTEMD_UNIT) || true
+	rm -f $(SYSTEMD_UNIT_DIR)/$(SYSTEMD_UNIT)
+	systemctl daemon-reload
 	@echo "Note: $(LOCK_DIR) was left in place in case jobs are still using it."
+	@echo "Note: current GPU compute mode was left as-is; it will revert to the driver default on the next reboot since the unit is gone."

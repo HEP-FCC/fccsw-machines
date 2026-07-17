@@ -50,8 +50,35 @@ clear_meta() {
     rm -f "$(meta_file "$gpu")" 2>/dev/null || true
 }
 
+# PIDs of compute processes the driver sees on $1, regardless of whether
+# they went through excubitor at all -- this is how we catch a bypass.
+untracked_pids() {
+    local gpu="$1"
+    command -v nvidia-smi >/dev/null 2>&1 || return
+    nvidia-smi -i "$gpu" --query-compute-apps=pid --format=csv,noheader 2>/dev/null | paste -sd, -
+}
+
+# Owning user for a single pid, "?" if it can't be resolved (e.g. the
+# process already exited between the nvidia-smi query and this lookup).
+pid_owner() {
+    local pid="$1" u
+    u="$(ps -o user= -p "$pid" 2>/dev/null | tr -d '[:space:]')"
+    echo "${u:-?}"
+}
+
+# $1: comma-separated pid list -> comma-separated owners, same order.
+untracked_owners() {
+    local pids="$1" pid_arr owners=() pid
+    IFS=',' read -ra pid_arr <<< "$pids"
+    for pid in "${pid_arr[@]}"; do
+        owners+=("$(pid_owner "$pid")")
+    done
+    local IFS=','
+    echo "${owners[*]}"
+}
+
 status() {
-    printf "%-6s %-8s %-12s %-8s %-20s %s\n" "GPU" "STATE" "USER" "PID" "SINCE" "CMD"
+    printf "%-6s %-10s %-12s %-8s %-20s %s\n" "GPU" "STATE" "USER" "PID" "SINCE" "CMD"
     for gpu in $(gpu_ids); do
         local mf; mf="$(meta_file "$gpu")"
         if is_locked "$gpu"; then
@@ -62,15 +89,24 @@ status() {
                 lsince=$(cut -d'|' -f3 "$mf")
                 lcmd=$(cut -d'|' -f4- "$mf")
                 if kill -0 "$lpid" 2>/dev/null; then
-                    printf "%-6s %-8s %-12s %-8s %-20s %s\n" "$gpu" "BUSY" "$luser" "$lpid" "$lsince" "$lcmd"
+                    printf "%-6s %-10s %-12s %-8s %-20s %s\n" "$gpu" "BUSY" "$luser" "$lpid" "$lsince" "$lcmd"
                 else
-                    printf "%-6s %-8s %-12s %-8s %-20s %s\n" "$gpu" "STALE" "$luser" "$lpid" "$lsince" "(process gone)"
+                    printf "%-6s %-10s %-12s %-8s %-20s %s\n" "$gpu" "STALE" "$luser" "$lpid" "$lsince" "(process gone)"
                 fi
             else
-                printf "%-6s %-8s %-12s %-8s %-20s %s\n" "$gpu" "BUSY" "?" "?" "?" "?"
+                printf "%-6s %-10s %-12s %-8s %-20s %s\n" "$gpu" "BUSY" "?" "?" "?" "?"
             fi
         else
-            printf "%-6s %-8s\n" "$gpu" "free"
+            # free per our own lock bookkeeping -- but that only reflects
+            # jobs that went through `excubitor run` in the first place,
+            # so cross-check against what the driver actually sees.
+            local bypass_pids; bypass_pids="$(untracked_pids "$gpu")"
+            if [[ -n "$bypass_pids" ]]; then
+                local bypass_users; bypass_users="$(untracked_owners "$bypass_pids")"
+                printf "%-6s %-10s %-12s %-8s %-20s %s\n" "$gpu" "UNTRACKED" "$bypass_users" "$bypass_pids" "?" "(bypassed excubitor -- driver shows active process(es))"
+            else
+                printf "%-6s %-10s\n" "$gpu" "free"
+            fi
         fi
     done
 }

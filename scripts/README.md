@@ -12,8 +12,9 @@ command and an admin command:
 
 This is COOPERATIVE only: it stops nothing at the kernel/driver level. It
 only works if everyone uses `excubitor run` instead of launching CUDA jobs
-directly. Pair it with `nvidia-smi -c EXCLUSIVE_PROCESS` as a hard backstop
-so a forgotten lock causes a crash instead of silent corruption.
+directly. `make install` also sets up `nvidia-smi -c EXCLUSIVE_PROCESS` as
+a hard backstop (see below) so a forgotten lock causes a crash instead of
+silent corruption.
 
 ### Installation (AlmaLinux 9 GPU nodes)
 
@@ -42,12 +43,23 @@ on reboot and `excubitor` would refuse to run until someone re-ran `init`
 by hand. `excubitor` refuses to run until `init` has been done at least
 once.
 
+`make install` also installs and enables
+`systemd/nvidia-exclusive-process.service`, which runs `nvidia-smi -c
+EXCLUSIVE_PROCESS` once now and again on every future boot (GPU compute
+mode, like the lock dir, resets on reboot and isn't backed by any file
+that would otherwise survive it). Enabling can fail if a GPU already has
+a running process on it — `make install` warns rather than aborting in
+that case; re-run `systemctl restart nvidia-exclusive-process.service`
+once idle.
+
 To update after a `git pull`, re-run `sudo make -C ~/fccsw-machines/scripts
 install` — the installed copies don't update themselves.
 
 To remove: `sudo make -C ~/fccsw-machines/scripts uninstall`. This removes
-the installed commands and the tmpfiles.d rule, but leaves the lock
-directory itself in place in case jobs are still using it.
+the installed commands, the tmpfiles.d rule, and the systemd unit, but
+leaves the lock directory and the GPU's current compute mode in place —
+the latter reverts to the driver default only on the next reboot, since
+the unit that re-applies it is gone.
 
 Both `PREFIX` (default `/usr/local`) and `BINDIR`/`LIBEXECDIR` can be
 overridden, e.g. `make install PREFIX=/opt`.
@@ -67,6 +79,12 @@ excubitor run -n 2 -t 600 -- python train_multi.py
 
 Set `EXCUBITOR_GPU_TOTAL` to override the auto-detected GPU count, e.g. to
 reserve one GPU for something else.
+
+`status` also cross-checks against `nvidia-smi --query-compute-apps` and
+flags a GPU as `UNTRACKED` (with the owning user and PID(s), via `ps`) if
+it's busy with a process that never went through `excubitor run` -- i.e.
+someone bypassed it entirely. This is visibility only; nothing here stops
+or evicts an untracked process.
 
 ### Admin maintenance
 
