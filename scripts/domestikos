@@ -1,0 +1,67 @@
+#!/usr/bin/env bash
+#
+# domestikos - admin commands for excubitor, the GPU lock manager
+#
+# Named after the Domestikos ton Exkoubiton, the Byzantine officer who
+# commanded the excubitores palace guard.
+#
+# Must be run as root. Owns the two things a regular user cannot do:
+#   - provisioning LOCK_DIR with the right ownership/permissions, and
+#   - force-clearing another user's stale (dead-process) lock/meta files,
+#     which the sticky bit on LOCK_DIR otherwise blocks.
+# It never touches a lock still held by a live process -- there is no
+# force-eviction of running jobs, only cleanup of already-dead ones.
+#
+# Usage:
+#   domestikos init     # create/fix LOCK_DIR permissions (idempotent)
+#   domestikos gc        # force-clear stale locks/meta, any user
+#   domestikos status    # same view as `excubitor status`
+#
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=lib/excubitor-common.sh
+source "${SCRIPT_DIR}/lib/excubitor-common.sh"
+
+require_root() {
+    if [[ "${EUID}" -ne 0 ]]; then
+        echo "ERROR: domestikos must be run as root" >&2
+        exit 1
+    fi
+}
+
+cmd_init() {
+    require_root
+    mkdir -p "$LOCK_DIR"
+    chmod 1777 "$LOCK_DIR"   # sticky, world-writable so any user can create/hold locks
+    echo "[domestikos] ${LOCK_DIR} ready (mode 1777)"
+}
+
+cmd_gc() {
+    require_root
+    require_lock_dir
+    local cleared=0
+    for gpu in $(gpu_ids); do
+        local mf; mf="$(meta_file "$gpu")"
+        if [[ -f "$mf" ]] && ! is_locked "$gpu"; then
+            clear_meta "$gpu"
+            cleared=$((cleared + 1))
+        fi
+    done
+    echo "[domestikos] cleared ${cleared} stale lock(s)"
+}
+
+cmd_status() {
+    require_lock_dir
+    status
+}
+
+case "${1:-}" in
+    init) cmd_init ;;
+    gc) cmd_gc ;;
+    status) cmd_status ;;
+    *)
+        echo "usage: domestikos {init|gc|status}" >&2
+        exit 1
+        ;;
+esac

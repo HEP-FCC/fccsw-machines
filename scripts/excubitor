@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 #
-# excubitor.sh - simple cooperative lock manager for a shared multi-GPU node
+# excubitor - cooperative GPU lock manager for a shared multi-GPU node
+# (user commands: run / status / release)
 #
 # Locks are per-GPU-index, backed by flock on files under LOCK_DIR.
 # This is COOPERATIVE only: it stops nothing at the kernel/driver level.
@@ -8,77 +9,31 @@
 # jobs directly. Pair with `nvidia-smi -c EXCLUSIVE_PROCESS` as a hard
 # backstop so a forgotten lock causes a crash instead of silent corruption.
 #
+# LOCK_DIR must already exist -- an admin provisions it once with
+# `domestikos init`. See domestikos for admin-only commands (dir
+# provisioning, force-clearing stale locks left by other users).
+#
 # Usage:
-#   excubitor.sh status
-#   excubitor.sh run -n <num_gpus> [-t <timeout_sec>] -- <command...>
-#   excubitor.sh acquire -n <num_gpus> [-t <timeout_sec>]   # prints GPU ids, holds locks in subshell
-#   excubitor.sh release <gpu_id> [<gpu_id> ...]
+#   excubitor status
+#   excubitor run -n <num_gpus> [-t <timeout_sec>] -- <command...>
+#   excubitor release <gpu_id> [<gpu_id> ...]
 #
 # Examples:
-#   excubitor.sh run -n 1 -- python train.py
-#   excubitor.sh run -n 2 -t 600 -- python train_multi.py
-#   excubitor.sh status
+#   excubitor run -n 1 -- python train.py
+#   excubitor run -n 2 -t 600 -- python train_multi.py
+#   excubitor status
 #
 set -euo pipefail
 
-LOCK_DIR="/var/lock/excubitor"
-NUM_GPUS_TOTAL="${EXCUBITOR_GPU_TOTAL:-4}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=lib/excubitor-common.sh
+source "${SCRIPT_DIR}/lib/excubitor-common.sh"
+
 DEFAULT_TIMEOUT=0   # 0 = wait forever
 
-mkdir -p "$LOCK_DIR"
-chmod 1777 "$LOCK_DIR"   # sticky, world-writable so any user can create/hold locks
+require_lock_dir
 
-# ---- helpers ---------------------------------------------------------
-
-lock_file() { echo "${LOCK_DIR}/gpu${1}.lock"; }
-meta_file() { echo "${LOCK_DIR}/gpu${1}.meta"; }
-
-gpu_ids() {
-    seq 0 $((NUM_GPUS_TOTAL - 1))
-}
-
-is_locked() {
-    local gpu="$1"
-    local lf; lf="$(lock_file "$gpu")"
-    # try a non-blocking shared-then-exclusive probe via flock in a subshell
-    if command -v flock >/dev/null; then
-        exec {fd}>"$lf" 2>/dev/null || return 1
-        if flock -n -x "$fd"; then
-            flock -u "$fd"
-            exec {fd}>&-
-            return 1   # not locked
-        else
-            exec {fd}>&-
-            return 0   # locked
-        fi
-    fi
-}
-
-status() {
-    printf "%-6s %-8s %-12s %-8s %-20s %s\n" "GPU" "STATE" "USER" "PID" "SINCE" "CMD"
-    for gpu in $(gpu_ids); do
-        local mf; mf="$(meta_file "$gpu")"
-        if is_locked "$gpu"; then
-            if [[ -f "$mf" ]]; then
-                # shellcheck disable=SC1090
-                local luser lpid lsince lcmd
-                luser=$(cut -d'|' -f1 "$mf")
-                lpid=$(cut -d'|' -f2 "$mf")
-                lsince=$(cut -d'|' -f3 "$mf")
-                lcmd=$(cut -d'|' -f4- "$mf")
-                if kill -0 "$lpid" 2>/dev/null; then
-                    printf "%-6s %-8s %-12s %-8s %-20s %s\n" "$gpu" "BUSY" "$luser" "$lpid" "$lsince" "$lcmd"
-                else
-                    printf "%-6s %-8s %-12s %-8s %-20s %s\n" "$gpu" "STALE" "$luser" "$lpid" "$lsince" "(process gone, will clear)"
-                fi
-            else
-                printf "%-6s %-8s %-12s %-8s %-20s %s\n" "$gpu" "BUSY" "?" "?" "?" "?"
-            fi
-        else
-            printf "%-6s %-8s\n" "$gpu" "free"
-        fi
-    done
-}
+# ---- locking -------------------------------------------------------------
 
 # Try to acquire exactly $1 GPUs. MUST be called directly (never via
 # command substitution / a pipeline) -- it must run in the caller's own
@@ -135,11 +90,6 @@ write_meta() {
     echo "${USER}|$$|$(date '+%Y-%m-%d %H:%M:%S')|$*" > "$(meta_file "$gpu")"
 }
 
-clear_meta() {
-    local gpu="$1"
-    rm -f "$(meta_file "$gpu")"
-}
-
 release_gpu_ids() {
     for gpu in "$@"; do
         local lf; lf="$(lock_file "$gpu")"
@@ -167,7 +117,7 @@ cmd_run() {
     shift $((OPTIND - 1))
     if [[ "${1:-}" == "--" ]]; then shift; fi
     if [[ "$#" -eq 0 ]]; then
-        echo "usage: excubitor.sh run -n <num_gpus> [-t <timeout_sec>] -- <command...>" >&2
+        echo "usage: excubitor run -n <num_gpus> [-t <timeout_sec>] -- <command...>" >&2
         exit 1
     fi
 
@@ -214,21 +164,20 @@ cmd_status() { status; }
 
 cmd_release() {
     if [[ "$#" -eq 0 ]]; then
-        echo "usage: excubitor.sh release <gpu_id> [<gpu_id> ...]" >&2
+        echo "usage: excubitor release <gpu_id> [<gpu_id> ...]" >&2
         exit 1
     fi
     release_gpu_ids "$@"
 }
 
 cmd_gc() {
-    # clear meta files for locks whose owning PID is dead but lock file
-    # itself is not actually flocked (e.g. leftover from a crash before
-    # flock even engaged) -- flock itself auto-releases when the holding
-    # process dies, so this mostly just tidies up stale .meta files.
+    # best-effort self-service cleanup of stale (dead-process) meta files;
+    # can only remove ones we own, since LOCK_DIR is sticky -- anything
+    # left over belongs to another user and needs `domestikos gc`.
     for gpu in $(gpu_ids); do
         local mf; mf="$(meta_file "$gpu")"
         if [[ -f "$mf" ]] && ! is_locked "$gpu"; then
-            rm -f "$mf"
+            clear_meta "$gpu"
         fi
     done
 }
@@ -238,7 +187,7 @@ case "${1:-}" in
     status) shift; cmd_gc; cmd_status ;;
     release) shift; cmd_release "$@" ;;
     *)
-        echo "usage: excubitor.sh {run|status|release} ..." >&2
+        echo "usage: excubitor {run|status|release} ..." >&2
         exit 1
         ;;
 esac
