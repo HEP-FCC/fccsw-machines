@@ -7,7 +7,7 @@ Operational scripts for managing the FCC machines.
 A cooperative lock manager for a shared multi-GPU node, split into a user
 command and an admin command:
 
-- **`excubitor`** — run by anyone. `run`, `status`, `release`.
+- **`excubitor`** — run by anyone. `run`, `status`, `clean`.
 - **`domestikos`** — run by an admin (root). `gc`, `status`, `check`, `offenders`.
 
 This is COOPERATIVE only: it stops nothing at the kernel/driver level. It
@@ -85,7 +85,6 @@ overridden, e.g. `make install PREFIX=/opt`.
 ```
 excubitor status
 excubitor run -n <num_gpus> [-t <timeout_sec>] -- <command...>
-excubitor release <gpu_id> [<gpu_id> ...]
 ```
 
 ```
@@ -103,6 +102,16 @@ flags a GPU as `UNTRACKED` (with the owning user and PID(s), via `ps`) if
 it's busy with a process that never went through `excubitor run` -- i.e.
 someone bypassed it entirely. This is visibility only; nothing here stops
 or evicts an untracked process.
+
+```
+excubitor clean
+```
+
+Clears your own stale (dead-process) lock/meta files, e.g. left behind
+by a crashed job, and reports how many it found. `status` already does
+this same cleanup silently as a side effect; `clean` is for when you
+want to trigger it explicitly and see confirmation. Only affects entries
+you own -- another user's leftovers need `domestikos gc`.
 
 ### Admin maintenance
 

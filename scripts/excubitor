@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # excubitor - cooperative GPU lock manager for a shared multi-GPU node
-# (user commands: run / status / release)
+# (user commands: run / status / clean)
 #
 # Locks are per-GPU-index, backed by flock on files under LOCK_DIR.
 # This is COOPERATIVE only: it stops nothing at the kernel/driver level.
@@ -9,19 +9,11 @@
 # jobs directly. Pair with `nvidia-smi -c EXCLUSIVE_PROCESS` as a hard
 # backstop so a forgotten lock causes a crash instead of silent corruption.
 #
-# LOCK_DIR must already exist -- an admin provisions it once with
-# `domestikos init`. See domestikos for admin-only commands (dir
-# provisioning, force-clearing stale locks left by other users).
+# LOCK_DIR must already exist -- an admin provisions it via `make
+# install`. See domestikos for admin-only commands (force-clearing stale
+# locks left by other users, periodic bypass checking).
 #
-# Usage:
-#   excubitor status
-#   excubitor run -n <num_gpus> [-t <timeout_sec>] -- <command...>
-#   excubitor release <gpu_id> [<gpu_id> ...]
-#
-# Examples:
-#   excubitor run -n 1 -- python train.py
-#   excubitor run -n 2 -t 600 -- python train_multi.py
-#   excubitor status
+# Run `excubitor -h` or `excubitor <command> -h` for usage.
 #
 set -euo pipefail
 
@@ -31,8 +23,24 @@ source "${SCRIPT_DIR}/lib/excubitor-common.sh"
 
 DEFAULT_TIMEOUT=0   # 0 = wait forever
 
-require_lock_dir
-require_gpu_count
+is_help() { [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; }
+
+print_usage() {
+    cat <<'EOF'
+usage: excubitor {run|status|clean} ...
+
+  excubitor status
+  excubitor run -n <num_gpus> [-t <timeout_sec>] -- <command...>
+  excubitor clean
+
+Examples:
+  excubitor run -n 1 -- python train.py
+  excubitor run -n 2 -t 600 -- python train_multi.py
+  excubitor status
+
+Run 'excubitor <command> -h' for details on a specific command.
+EOF
+}
 
 # ---- locking -------------------------------------------------------------
 
@@ -91,22 +99,25 @@ write_meta() {
     echo "${USER}|$$|$(date '+%Y-%m-%d %H:%M:%S')|$*" > "$(meta_file "$gpu")"
 }
 
-release_gpu_ids() {
-    for gpu in "$@"; do
-        local lf; lf="$(lock_file "$gpu")"
-        exec {fd}>"$lf"
-        if flock -n -x "$fd"; then
-            # nobody held it -- nothing to release, but clean stale meta anyway
-            clear_meta "$gpu"
-            flock -u "$fd"
-        else
-            echo "WARN: GPU $gpu currently locked by another process; cannot force-release" >&2
-        fi
-        exec {fd}>&-
-    done
-}
-
 cmd_run() {
+    if is_help "${1:-}"; then
+        cat <<'EOF'
+usage: excubitor run -n <num_gpus> [-t <timeout_sec>] -- <command...>
+
+Acquire <num_gpus> free GPU(s) (waiting up to <timeout_sec> seconds, or
+forever if omitted/0), set CUDA_VISIBLE_DEVICES for <command>, run it,
+and release the GPU(s) when it exits.
+
+Examples:
+  excubitor run -n 1 -- python train.py
+  excubitor run -n 2 -t 600 -- python train_multi.py
+EOF
+        exit 0
+    fi
+
+    require_lock_dir
+    require_gpu_count
+
     local n=1 timeout="$DEFAULT_TIMEOUT"
     while getopts "n:t:" opt; do
         case "$opt" in
@@ -161,34 +172,60 @@ cmd_run() {
     CUDA_VISIBLE_DEVICES="$cvd" "$@"
 }
 
-cmd_status() { status; }
-
-cmd_release() {
-    if [[ "$#" -eq 0 ]]; then
-        echo "usage: excubitor release <gpu_id> [<gpu_id> ...]" >&2
-        exit 1
-    fi
-    release_gpu_ids "$@"
-}
-
-cmd_gc() {
-    # best-effort self-service cleanup of stale (dead-process) meta files;
-    # can only remove ones we own, since LOCK_DIR is sticky -- anything
-    # left over belongs to another user and needs `domestikos gc`.
+# Best-effort self-service cleanup of stale (dead-process) meta files we
+# own; can't touch another user's, since LOCK_DIR is sticky -- those need
+# `domestikos gc`. Prints the count cleared, as a bare number, to stdout.
+self_clean() {
+    local cleared=0
     for gpu in $(gpu_ids); do
         local mf; mf="$(meta_file "$gpu")"
         if [[ -f "$mf" ]] && ! is_locked "$gpu"; then
             clear_meta "$gpu"
+            cleared=$((cleared + 1))
         fi
     done
+    echo "$cleared"
+}
+
+cmd_status() {
+    if is_help "${1:-}"; then
+        echo "usage: excubitor status"
+        exit 0
+    fi
+
+    require_lock_dir
+    require_gpu_count
+    self_clean >/dev/null
+    status
+}
+
+cmd_clean() {
+    if is_help "${1:-}"; then
+        cat <<'EOF'
+usage: excubitor clean
+
+Clear your own stale (dead-process) lock/meta files, e.g. left behind by
+a crashed job. Only removes entries you own -- LOCK_DIR is sticky, so
+another user's leftovers need `domestikos gc`. Never touches a lock
+still held by a live process. `status` already does this automatically;
+`clean` is for when you want to be sure it happened and see the count.
+EOF
+        exit 0
+    fi
+
+    require_lock_dir
+    require_gpu_count
+    local cleared; cleared="$(self_clean)"
+    echo "[excubitor] cleared ${cleared} stale lock(s) (yours only -- another user's need 'domestikos gc')"
 }
 
 case "${1:-}" in
+    -h|--help|help) print_usage; exit 0 ;;
     run) shift; cmd_run "$@" ;;
-    status) shift; cmd_gc; cmd_status ;;
-    release) shift; cmd_release "$@" ;;
+    status) shift; cmd_status "$@" ;;
+    clean) shift; cmd_clean "$@" ;;
     *)
-        echo "usage: excubitor {run|status|release} ..." >&2
+        print_usage >&2
         exit 1
         ;;
 esac
