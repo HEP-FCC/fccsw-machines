@@ -101,3 +101,8 @@ Force-clears stale lock/meta files left behind by crashed jobs, regardless
 of which user owned them (a regular user's `excubitor status` can only
 clean up its own). This never touches a lock still held by a live process —
 there is no force-eviction of running jobs.
+
+### Support
+
+Problems should be reported to the administrators via the "FCC SW Machines"
+Mattermost channel: https://mattermost.web.cern.ch/fccsw/channels/fccsw-machines

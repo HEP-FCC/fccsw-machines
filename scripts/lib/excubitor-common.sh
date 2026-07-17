@@ -118,7 +118,7 @@ status() {
 
 require_lock_dir() {
     if [[ ! -d "$LOCK_DIR" ]]; then
-        echo "ERROR: ${LOCK_DIR} does not exist -- ask an admin to run 'make install'" >&2
+        echo "ERROR: ${LOCK_DIR} does not exist -- contact the administrators on Mattermost, \"FCC SW Machines\": https://mattermost.web.cern.ch/fccsw/channels/fccsw-machines" >&2
         exit 1
     fi
 }

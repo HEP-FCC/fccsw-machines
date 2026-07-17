@@ -25,6 +25,9 @@ cat <<'EOF'
 
   (excubitor: the Byzantine palace guard -- it stands watch over who
   holds which GPU.)
+
+  Problems? Contact the administrators on Mattermost, "FCC SW Machines":
+    https://mattermost.web.cern.ch/fccsw/channels/fccsw-machines
 ================================================================
 
 EOF
