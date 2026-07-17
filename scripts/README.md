@@ -55,11 +55,15 @@ once idle.
 To update after a `git pull`, re-run `sudo make -C ~/fccsw-machines/scripts
 install` — the installed copies don't update themselves.
 
+`make install` also installs `profile.d/excubitor.sh` into
+`/etc/profile.d/`, a login banner explaining `excubitor` usage to anyone
+who logs into the node interactively.
+
 To remove: `sudo make -C ~/fccsw-machines/scripts uninstall`. This removes
-the installed commands, the tmpfiles.d rule, and the systemd unit, but
-leaves the lock directory and the GPU's current compute mode in place —
-the latter reverts to the driver default only on the next reboot, since
-the unit that re-applies it is gone.
+the installed commands, the tmpfiles.d rule, the systemd unit, and the
+login banner, but leaves the lock directory and the GPU's current compute
+mode in place — the latter reverts to the driver default only on the next
+reboot, since the unit that re-applies it is gone.
 
 Both `PREFIX` (default `/usr/local`) and `BINDIR`/`LIBEXECDIR` can be
 overridden, e.g. `make install PREFIX=/opt`.
