@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# gpu-lock.sh - simple cooperative lock manager for a shared multi-GPU node
+# excubitor.sh - simple cooperative lock manager for a shared multi-GPU node
 #
 # Locks are per-GPU-index, backed by flock on files under LOCK_DIR.
 # This is COOPERATIVE only: it stops nothing at the kernel/driver level.
@@ -9,20 +9,20 @@
 # backstop so a forgotten lock causes a crash instead of silent corruption.
 #
 # Usage:
-#   gpu-lock.sh status
-#   gpu-lock.sh run -n <num_gpus> [-t <timeout_sec>] -- <command...>
-#   gpu-lock.sh acquire -n <num_gpus> [-t <timeout_sec>]   # prints GPU ids, holds locks in subshell
-#   gpu-lock.sh release <gpu_id> [<gpu_id> ...]
+#   excubitor.sh status
+#   excubitor.sh run -n <num_gpus> [-t <timeout_sec>] -- <command...>
+#   excubitor.sh acquire -n <num_gpus> [-t <timeout_sec>]   # prints GPU ids, holds locks in subshell
+#   excubitor.sh release <gpu_id> [<gpu_id> ...]
 #
 # Examples:
-#   gpu-lock.sh run -n 1 -- python train.py
-#   gpu-lock.sh run -n 2 -t 600 -- python train_multi.py
-#   gpu-lock.sh status
+#   excubitor.sh run -n 1 -- python train.py
+#   excubitor.sh run -n 2 -t 600 -- python train_multi.py
+#   excubitor.sh status
 #
 set -euo pipefail
 
-LOCK_DIR="/var/lock/gpu-locks"
-NUM_GPUS_TOTAL="${GPU_LOCK_TOTAL:-4}"
+LOCK_DIR="/var/lock/excubitor"
+NUM_GPUS_TOTAL="${EXCUBITOR_GPU_TOTAL:-4}"
 DEFAULT_TIMEOUT=0   # 0 = wait forever
 
 mkdir -p "$LOCK_DIR"
@@ -172,7 +172,7 @@ cmd_run() {
     shift $((OPTIND - 1))
     if [[ "${1:-}" == "--" ]]; then shift; fi
     if [[ "$#" -eq 0 ]]; then
-        echo "usage: gpu-lock.sh run -n <num_gpus> [-t <timeout_sec>] -- <command...>" >&2
+        echo "usage: excubitor.sh run -n <num_gpus> [-t <timeout_sec>] -- <command...>" >&2
         exit 1
     fi
 
@@ -181,7 +181,7 @@ cmd_run() {
         exit 1
     fi
     if [[ "$n" -gt "$NUM_GPUS_TOTAL" ]]; then
-        echo "ERROR: requested ${n} GPU(s) but only ${NUM_GPUS_TOTAL} are configured (set GPU_LOCK_TOTAL to override)" >&2
+        echo "ERROR: requested ${n} GPU(s) but only ${NUM_GPUS_TOTAL} are configured (set EXCUBITOR_GPU_TOTAL to override)" >&2
         exit 1
     fi
 
@@ -195,7 +195,7 @@ cmd_run() {
 
     local cvd
     cvd=$(IFS=,; echo "${gpu_arr[*]}")
-    echo "[gpu-lock] acquired GPU(s): ${cvd}  (user=${USER} pid=$$)"
+    echo "[excubitor] acquired GPU(s): ${cvd}  (user=${USER} pid=$$)"
 
     cleanup() {
         for fd in "${HELD_FDS[@]}"; do
@@ -205,7 +205,7 @@ cmd_run() {
         for gpu in "${HELD_GPUS[@]}"; do
             clear_meta "$gpu"
         done
-        echo "[gpu-lock] released GPU(s): ${cvd}"
+        echo "[excubitor] released GPU(s): ${cvd}"
     }
     trap cleanup EXIT INT TERM
 
@@ -216,7 +216,7 @@ cmd_status() { status; }
 
 cmd_release() {
     if [[ "$#" -eq 0 ]]; then
-        echo "usage: gpu-lock.sh release <gpu_id> [<gpu_id> ...]" >&2
+        echo "usage: excubitor.sh release <gpu_id> [<gpu_id> ...]" >&2
         exit 1
     fi
     release_gpu_ids "$@"
@@ -240,7 +240,7 @@ case "${1:-}" in
     status) shift; cmd_gc; cmd_status ;;
     release) shift; cmd_release "$@" ;;
     *)
-        echo "usage: gpu-lock.sh {run|status|release} ..." >&2
+        echo "usage: excubitor.sh {run|status|release} ..." >&2
         exit 1
         ;;
 esac
