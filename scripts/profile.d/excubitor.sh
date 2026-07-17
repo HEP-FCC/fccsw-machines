@@ -8,20 +8,17 @@
 cat <<'EOF'
 
 ================================================================
- This node has shared GPUs -- use excubitor, don't launch CUDA jobs directly.
+ Shared GPUs -- use excubitor, don't launch CUDA jobs directly.
 ================================================================
 
-  excubitor status                               # see what's free
+  excubitor status                                # see what's free
   excubitor run -n <N> [-t <secs>] -- <command>   # run using N GPUs
 
-  Examples:
+  Example:
     excubitor run -n 1 -- python train.py
-    excubitor run -n 2 -t 600 -- python train_multi.py
 
-  Bypassing excubitor on a GPU it already tracks as busy just fails --
-  the driver refuses a second CUDA context. But if you bypass it while
-  it's free, excubitor won't know, and a later `excubitor run` may get
-  assigned that same GPU and fail to start. Use excubitor every time.
+  Bypassing it on a free GPU can make a later `excubitor run` land on
+  the same one and fail to start. Use excubitor every time.
 
   (excubitor: the Byzantine palace guard -- it stands watch over who
   holds which GPU.)
