@@ -8,7 +8,7 @@ A cooperative lock manager for a shared multi-GPU node, split into a user
 command and an admin command:
 
 - **`excubitor`** — run by anyone. `run`, `status`, `release`.
-- **`domestikos`** — run by an admin (root). `init`, `gc`, `status`.
+- **`domestikos`** — run by an admin (root). `gc`, `status`.
 
 This is COOPERATIVE only: it stops nothing at the kernel/driver level. It
 only works if everyone uses `excubitor run` instead of launching CUDA jobs
@@ -32,16 +32,17 @@ sudo make -C ~/fccsw-machines/scripts install
 
 `make install` copies `excubitor`, `domestikos`, and `lib/` into
 `/usr/local/libexec/excubitor/` (a publicly reachable location, unlike the
-clone itself if it lives under `/root`), symlinks `/usr/local/bin/excubitor`
-and `/usr/local/bin/domestikos` to those copies, and runs `domestikos init`.
+clone itself if it lives under `/root`), and symlinks `/usr/local/bin/excubitor`
+and `/usr/local/bin/domestikos` to those copies.
 
-`domestikos init` creates the shared lock directory (`/var/lock/excubitor`
-by default) and writes `/etc/tmpfiles.d/excubitor.conf` so systemd recreates
-it automatically on every boot — `/var/lock` is a tmpfs on AlmaLinux/RHEL
-(symlinked to `/run/lock`), so without that rule the directory would vanish
-on reboot and `excubitor` would refuse to run until someone re-ran `init`
-by hand. `excubitor` refuses to run until `init` has been done at least
-once.
+`make install` also installs `tmpfiles.d/excubitor.conf` into
+`/etc/tmpfiles.d/` and runs `systemd-tmpfiles --create` to apply it
+immediately, creating the shared lock directory (`/var/lock/excubitor` by
+default, mode `1777`). systemd re-applies this rule on every future boot
+too — `/var/lock` is a tmpfs on AlmaLinux/RHEL (symlinked to `/run/lock`),
+so without it the directory would vanish on reboot and `excubitor` would
+refuse to run until someone reinstalled by hand. `excubitor` refuses to
+run until this has been done at least once.
 
 `make install` also installs and enables
 `systemd/nvidia-exclusive-process.service`, which runs `nvidia-smi -c
@@ -93,7 +94,7 @@ or evicts an untracked process.
 ### Admin maintenance
 
 ```
-sudo ./domestikos gc
+sudo domestikos gc
 ```
 
 Force-clears stale lock/meta files left behind by crashed jobs, regardless

@@ -22,7 +22,8 @@ install:
 	install -m 644 $(SCRIPT_DIR)/lib/excubitor-common.sh $(LIBEXECDIR)/lib/excubitor-common.sh
 	ln -sf $(LIBEXECDIR)/excubitor $(BINDIR)/excubitor
 	ln -sf $(LIBEXECDIR)/domestikos $(BINDIR)/domestikos
-	$(BINDIR)/domestikos init
+	install -m 644 $(SCRIPT_DIR)/tmpfiles.d/excubitor.conf $(TMPFILES_CONF)
+	systemd-tmpfiles --create $(TMPFILES_CONF)
 	install -m 644 $(SCRIPT_DIR)/systemd/$(SYSTEMD_UNIT) $(SYSTEMD_UNIT_DIR)/$(SYSTEMD_UNIT)
 	systemctl daemon-reload
 	systemctl enable --now $(SYSTEMD_UNIT) || echo "WARN: failed to enable $(SYSTEMD_UNIT) -- likely a GPU is currently in use; retry with 'systemctl restart $(SYSTEMD_UNIT)' once idle" >&2

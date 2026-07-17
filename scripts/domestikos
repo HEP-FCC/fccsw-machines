@@ -5,15 +5,16 @@
 # Named after the Domestikos ton Exkoubiton, the Byzantine officer who
 # commanded the excubitores palace guard.
 #
-# Must be run as root. Owns the two things a regular user cannot do:
-#   - provisioning LOCK_DIR with the right ownership/permissions, and
-#   - force-clearing another user's stale (dead-process) lock/meta files,
-#     which the sticky bit on LOCK_DIR otherwise blocks.
-# It never touches a lock still held by a live process -- there is no
-# force-eviction of running jobs, only cleanup of already-dead ones.
+# Must be run as root. Owns the one thing a regular user cannot do:
+# force-clearing another user's stale (dead-process) lock/meta files,
+# which the sticky bit on LOCK_DIR otherwise blocks. It never touches a
+# lock still held by a live process -- there is no force-eviction of
+# running jobs, only cleanup of already-dead ones.
+#
+# LOCK_DIR provisioning is handled by `make install` (see
+# tmpfiles.d/excubitor.conf), not by this script.
 #
 # Usage:
-#   domestikos init     # create/fix LOCK_DIR permissions (idempotent)
 #   domestikos gc        # force-clear stale locks/meta, any user
 #   domestikos status    # same view as `excubitor status`
 #
@@ -28,21 +29,6 @@ require_root() {
         echo "ERROR: domestikos must be run as root" >&2
         exit 1
     fi
-}
-
-cmd_init() {
-    require_root
-    mkdir -p "$LOCK_DIR"
-    chmod 1777 "$LOCK_DIR"   # sticky, world-writable so any user can create/hold locks
-    echo "[domestikos] ${LOCK_DIR} ready (mode 1777)"
-
-    # /var/lock is a tmpfs (symlinked to /run/lock on AlmaLinux/RHEL), so
-    # LOCK_DIR is wiped on every reboot. Drop a tmpfiles.d rule so systemd
-    # recreates it automatically at boot instead of requiring a manual
-    # re-init after every reboot.
-    local tmpfiles_conf="/etc/tmpfiles.d/excubitor.conf"
-    echo "d ${LOCK_DIR} 1777 root root -" > "$tmpfiles_conf"
-    echo "[domestikos] wrote ${tmpfiles_conf} (recreates ${LOCK_DIR} on every boot)"
 }
 
 cmd_gc() {
@@ -65,11 +51,10 @@ cmd_status() {
 }
 
 case "${1:-}" in
-    init) cmd_init ;;
     gc) cmd_gc ;;
     status) cmd_status ;;
     *)
-        echo "usage: domestikos {init|gc|status}" >&2
+        echo "usage: domestikos {gc|status}" >&2
         exit 1
         ;;
 esac

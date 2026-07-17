@@ -52,17 +52,22 @@ clear_meta() {
 
 # PIDs of compute processes the driver sees on $1, regardless of whether
 # they went through excubitor at all -- this is how we catch a bypass.
+# Always exits 0 (empty output = none found/unknown): under `set -e`, a
+# plain `var=$(...)` assignment inherits the command's exit status and
+# aborts the whole script if it's non-zero, so callers must be able to
+# trust this never fails even when nvidia-smi is missing or errors.
 untracked_pids() {
     local gpu="$1"
-    command -v nvidia-smi >/dev/null 2>&1 || return
-    nvidia-smi -i "$gpu" --query-compute-apps=pid --format=csv,noheader 2>/dev/null | paste -sd, -
+    command -v nvidia-smi >/dev/null 2>&1 || return 0
+    nvidia-smi -i "$gpu" --query-compute-apps=pid --format=csv,noheader 2>/dev/null | paste -sd, - || true
 }
 
 # Owning user for a single pid, "?" if it can't be resolved (e.g. the
 # process already exited between the nvidia-smi query and this lookup).
+# Always exits 0, for the same reason as untracked_pids above.
 pid_owner() {
     local pid="$1" u
-    u="$(ps -o user= -p "$pid" 2>/dev/null | tr -d '[:space:]')"
+    u="$(ps -o user= -p "$pid" 2>/dev/null | tr -d '[:space:]')" || true
     echo "${u:-?}"
 }
 
@@ -100,9 +105,9 @@ status() {
             # free per our own lock bookkeeping -- but that only reflects
             # jobs that went through `excubitor run` in the first place,
             # so cross-check against what the driver actually sees.
-            local bypass_pids; bypass_pids="$(untracked_pids "$gpu")"
+            local bypass_pids; bypass_pids="$(untracked_pids "$gpu")" || true
             if [[ -n "$bypass_pids" ]]; then
-                local bypass_users; bypass_users="$(untracked_owners "$bypass_pids")"
+                local bypass_users; bypass_users="$(untracked_owners "$bypass_pids")" || true
                 printf "%-6s %-10s %-12s %-8s %-20s %s\n" "$gpu" "UNTRACKED" "$bypass_users" "$bypass_pids" "?" "(bypassed excubitor -- driver shows active process(es))"
             else
                 printf "%-6s %-10s\n" "$gpu" "free"
@@ -113,7 +118,7 @@ status() {
 
 require_lock_dir() {
     if [[ ! -d "$LOCK_DIR" ]]; then
-        echo "ERROR: ${LOCK_DIR} does not exist -- ask an admin to run 'domestikos init'" >&2
+        echo "ERROR: ${LOCK_DIR} does not exist -- ask an admin to run 'make install'" >&2
         exit 1
     fi
 }
