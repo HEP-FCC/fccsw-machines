@@ -1,29 +1,12 @@
 # fccsw-machines
 
-This PHP page shows status of the FCC Ironic and GPU machines at:
+Code for managing the FCC software group's servers.
 
-[https://fccsw.web.cern.ch/fccsw-machines](https://fccsw.web.cern.ch/fccsw-machines)
+## Layout
 
+- [`web/`](web/) — PHP status page for the FCC Ironic and GPU machines, served at
+  [https://fccsw.web.cern.ch/fccsw-machines](https://fccsw.web.cern.ch/fccsw-machines).
+- [`scripts/`](scripts/) — operational scripts for the machines (e.g. `gpu-lock.sh`,
+  a cooperative GPU lock manager for shared multi-GPU nodes).
 
-## Local development
-
-Install PHP, for RedHat based Linux distributions use:
-```
-dnf install php-cli php-snmp
-```
->
-> This page depends on PHP SNMP Class
->
-
-Run local server:
-```
-php -S localhost:8000
-```
-
-
-## Deployment
-
-The page lives at
-```
-/eos/project/f/fccsw-web/www/fccsw-machines/index.php
-```
+See the README in each directory for details.

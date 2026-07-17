@@ -1,0 +1,246 @@
+#!/usr/bin/env bash
+#
+# gpu-lock.sh - simple cooperative lock manager for a shared multi-GPU node
+#
+# Locks are per-GPU-index, backed by flock on files under LOCK_DIR.
+# This is COOPERATIVE only: it stops nothing at the kernel/driver level.
+# It only works if everyone uses this wrapper instead of launching CUDA
+# jobs directly. Pair with `nvidia-smi -c EXCLUSIVE_PROCESS` as a hard
+# backstop so a forgotten lock causes a crash instead of silent corruption.
+#
+# Usage:
+#   gpu-lock.sh status
+#   gpu-lock.sh run -n <num_gpus> [-t <timeout_sec>] -- <command...>
+#   gpu-lock.sh acquire -n <num_gpus> [-t <timeout_sec>]   # prints GPU ids, holds locks in subshell
+#   gpu-lock.sh release <gpu_id> [<gpu_id> ...]
+#
+# Examples:
+#   gpu-lock.sh run -n 1 -- python train.py
+#   gpu-lock.sh run -n 2 -t 600 -- python train_multi.py
+#   gpu-lock.sh status
+#
+set -euo pipefail
+
+LOCK_DIR="/var/lock/gpu-locks"
+NUM_GPUS_TOTAL="${GPU_LOCK_TOTAL:-4}"
+DEFAULT_TIMEOUT=0   # 0 = wait forever
+
+mkdir -p "$LOCK_DIR"
+chmod 1777 "$LOCK_DIR"   # sticky, world-writable so any user can create/hold locks
+
+# ---- helpers ---------------------------------------------------------
+
+lock_file() { echo "${LOCK_DIR}/gpu${1}.lock"; }
+meta_file() { echo "${LOCK_DIR}/gpu${1}.meta"; }
+
+gpu_ids() {
+    seq 0 $((NUM_GPUS_TOTAL - 1))
+}
+
+is_locked() {
+    local gpu="$1"
+    local lf; lf="$(lock_file "$gpu")"
+    # try a non-blocking shared-then-exclusive probe via flock in a subshell
+    if command -v flock >/dev/null; then
+        exec {fd}>"$lf" 2>/dev/null || return 1
+        if flock -n -x "$fd"; then
+            flock -u "$fd"
+            exec {fd}>&-
+            return 1   # not locked
+        else
+            exec {fd}>&-
+            return 0   # locked
+        fi
+    fi
+}
+
+status() {
+    printf "%-6s %-8s %-12s %-8s %-20s %s\n" "GPU" "STATE" "USER" "PID" "SINCE" "CMD"
+    for gpu in $(gpu_ids); do
+        local mf; mf="$(meta_file "$gpu")"
+        if is_locked "$gpu"; then
+            if [[ -f "$mf" ]]; then
+                # shellcheck disable=SC1090
+                local luser lpid lsince lcmd
+                luser=$(cut -d'|' -f1 "$mf")
+                lpid=$(cut -d'|' -f2 "$mf")
+                lsince=$(cut -d'|' -f3 "$mf")
+                lcmd=$(cut -d'|' -f4- "$mf")
+                if kill -0 "$lpid" 2>/dev/null; then
+                    printf "%-6s %-8s %-12s %-8s %-20s %s\n" "$gpu" "BUSY" "$luser" "$lpid" "$lsince" "$lcmd"
+                else
+                    printf "%-6s %-8s %-12s %-8s %-20s %s\n" "$gpu" "STALE" "$luser" "$lpid" "$lsince" "(process gone, will clear)"
+                fi
+            else
+                printf "%-6s %-8s %-12s %-8s %-20s %s\n" "$gpu" "BUSY" "?" "?" "?" "?"
+            fi
+        else
+            printf "%-6s %-8s\n" "$gpu" "free"
+        fi
+    done
+}
+
+# Try to acquire exactly $1 GPUs. On success, prints a space-separated
+# list of GPU ids to stdout and leaves fds open (via global FDS array)
+# held by the caller for the lifetime of the process.
+declare -a HELD_FDS=()
+declare -a HELD_GPUS=()
+
+acquire_n() {
+    local n="$1"
+    local timeout="$2"
+    local got=()
+    local deadline=0
+    if [[ "$timeout" -gt 0 ]]; then
+        deadline=$(( $(date +%s) + timeout ))
+    fi
+
+    while true; do
+        got=()
+        HELD_FDS=()
+        HELD_GPUS=()
+        for gpu in $(gpu_ids); do
+            local lf; lf="$(lock_file "$gpu")"
+            exec {fd}>"$lf"
+            if flock -n -x "$fd"; then
+                HELD_FDS+=("$fd")
+                HELD_GPUS+=("$gpu")
+                got+=("$gpu")
+                if [[ "${#got[@]}" -eq "$n" ]]; then
+                    break
+                fi
+            else
+                exec {fd}>&-
+            fi
+        done
+
+        if [[ "${#got[@]}" -eq "$n" ]]; then
+            echo "${got[@]}"
+            return 0
+        fi
+
+        # not enough free GPUs right now: release what we grabbed, wait, retry
+        for fd in "${HELD_FDS[@]}"; do
+            flock -u "$fd"
+            exec {fd}>&-
+        done
+        HELD_FDS=()
+        HELD_GPUS=()
+
+        if [[ "$timeout" -gt 0 && "$(date +%s)" -ge "$deadline" ]]; then
+            echo "ERROR: timed out waiting for ${n} free GPU(s)" >&2
+            return 1
+        fi
+        sleep 5
+    done
+}
+
+write_meta() {
+    local gpu="$1"; shift
+    echo "${USER}|$$|$(date '+%Y-%m-%d %H:%M:%S')|$*" > "$(meta_file "$gpu")"
+}
+
+clear_meta() {
+    local gpu="$1"
+    rm -f "$(meta_file "$gpu")"
+}
+
+release_gpu_ids() {
+    for gpu in "$@"; do
+        local lf; lf="$(lock_file "$gpu")"
+        exec {fd}>"$lf"
+        if flock -n -x "$fd"; then
+            # nobody held it -- nothing to release, but clean stale meta anyway
+            clear_meta "$gpu"
+            flock -u "$fd"
+        else
+            echo "WARN: GPU $gpu currently locked by another process; cannot force-release" >&2
+        fi
+        exec {fd}>&-
+    done
+}
+
+cmd_run() {
+    local n=1 timeout="$DEFAULT_TIMEOUT"
+    while getopts "n:t:" opt; do
+        case "$opt" in
+            n) n="$OPTARG" ;;
+            t) timeout="$OPTARG" ;;
+            *) ;;
+        esac
+    done
+    shift $((OPTIND - 1))
+    if [[ "${1:-}" == "--" ]]; then shift; fi
+    if [[ "$#" -eq 0 ]]; then
+        echo "usage: gpu-lock.sh run -n <num_gpus> [-t <timeout_sec>] -- <command...>" >&2
+        exit 1
+    fi
+
+    if ! [[ "$n" =~ ^[0-9]+$ ]] || [[ "$n" -lt 1 ]]; then
+        echo "ERROR: -n must be a positive integer (got '${n}')" >&2
+        exit 1
+    fi
+    if [[ "$n" -gt "$NUM_GPUS_TOTAL" ]]; then
+        echo "ERROR: requested ${n} GPU(s) but only ${NUM_GPUS_TOTAL} are configured (set GPU_LOCK_TOTAL to override)" >&2
+        exit 1
+    fi
+
+    local gpus
+    gpus=$(acquire_n "$n" "$timeout") || exit 1
+    read -r -a gpu_arr <<< "$gpus"
+
+    for gpu in "${gpu_arr[@]}"; do
+        write_meta "$gpu" "$*"
+    done
+
+    local cvd
+    cvd=$(IFS=,; echo "${gpu_arr[*]}")
+    echo "[gpu-lock] acquired GPU(s): ${cvd}  (user=${USER} pid=$$)"
+
+    cleanup() {
+        for fd in "${HELD_FDS[@]}"; do
+            flock -u "$fd" 2>/dev/null || true
+            exec {fd}>&- 2>/dev/null || true
+        done
+        for gpu in "${HELD_GPUS[@]}"; do
+            clear_meta "$gpu"
+        done
+        echo "[gpu-lock] released GPU(s): ${cvd}"
+    }
+    trap cleanup EXIT INT TERM
+
+    CUDA_VISIBLE_DEVICES="$cvd" "$@"
+}
+
+cmd_status() { status; }
+
+cmd_release() {
+    if [[ "$#" -eq 0 ]]; then
+        echo "usage: gpu-lock.sh release <gpu_id> [<gpu_id> ...]" >&2
+        exit 1
+    fi
+    release_gpu_ids "$@"
+}
+
+cmd_gc() {
+    # clear meta files for locks whose owning PID is dead but lock file
+    # itself is not actually flocked (e.g. leftover from a crash before
+    # flock even engaged) -- flock itself auto-releases when the holding
+    # process dies, so this mostly just tidies up stale .meta files.
+    for gpu in $(gpu_ids); do
+        local mf; mf="$(meta_file "$gpu")"
+        if [[ -f "$mf" ]] && ! is_locked "$gpu"; then
+            rm -f "$mf"
+        fi
+    done
+}
+
+case "${1:-}" in
+    run) shift; cmd_run "$@" ;;
+    status) shift; cmd_gc; cmd_status ;;
+    release) shift; cmd_release "$@" ;;
+    *)
+        echo "usage: gpu-lock.sh {run|status|release} ..." >&2
+        exit 1
+        ;;
+esac
