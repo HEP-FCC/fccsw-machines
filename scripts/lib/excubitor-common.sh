@@ -23,6 +23,27 @@ fi
 lock_file() { echo "${LOCK_DIR}/gpu${1}.lock"; }
 meta_file() { echo "${LOCK_DIR}/gpu${1}.meta"; }
 
+# Open $1 as fd variable `fd` (bash's {fd}-allocation, not a nameref --
+# callers read it back via the plain $fd variable this sets in their own
+# scope). Must be called directly (never via `$(...)` or in a pipeline)
+# when the caller needs the fd to survive beyond this call, same
+# constraint as acquire_n() below.
+#
+# Lock files are shared across whichever user happens to touch a given
+# GPU index first, so their permissions can't depend on that user's
+# umask -- force world-writable (LOCK_DIR is already 1777, so this
+# doesn't widen who can get *at* the file, only who can write it once
+# it's their turn to create it).
+open_lock_fd() {
+    local lf="$1"
+    local old_umask; old_umask="$(umask)"
+    umask 000
+    exec {fd}>"$lf"
+    local rc=$?
+    umask "$old_umask"
+    return "$rc"
+}
+
 gpu_ids() {
     seq 0 $((NUM_GPUS_TOTAL - 1))
 }
@@ -38,7 +59,7 @@ is_locked() {
     # a subshell confines that entirely to the subshell, which exits
     # immediately after.
     (
-        exec {fd}>"$lf" || exit 1
+        open_lock_fd "$lf" || exit 1
         if flock -n -x "$fd"; then
             exit 1   # got the lock -> it was NOT locked
         else

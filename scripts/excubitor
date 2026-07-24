@@ -66,7 +66,10 @@ acquire_n() {
         HELD_GPUS=()
         for gpu in $(gpu_ids); do
             local lf; lf="$(lock_file "$gpu")"
-            exec {fd}>"$lf"
+            if ! open_lock_fd "$lf"; then
+                echo "ERROR: cannot open lock file for GPU ${gpu} (${lf}) -- contact the administrators on Mattermost, \"FCC SW Machines\": https://mattermost.web.cern.ch/fccsw/channels/fccsw-machines" >&2
+                exit 1
+            fi
             if flock -n -x "$fd"; then
                 HELD_FDS+=("$fd")
                 HELD_GPUS+=("$gpu")

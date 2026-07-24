@@ -110,6 +110,18 @@ EOF
         nvidia-smi -c EXCLUSIVE_PROCESS >/dev/null 2>&1 || true
     fi
 
+    # Self-heal lock file permissions: whichever user/process opens a
+    # gpu*.lock first (often domestikos itself, as root, since the timer
+    # starts within 5min of install -- well before any real job runs)
+    # creates it with their own umask, which can leave it unwritable by
+    # everyone else. open_lock_fd forces 666 on creation going forward,
+    # but this repairs already-existing files from before that fix, or
+    # from any other umask edge case.
+    for gpu in $(gpu_ids); do
+        local lf; lf="$(lock_file "$gpu")"
+        [[ -e "$lf" ]] && chmod 666 "$lf" 2>/dev/null || true
+    done
+
     for gpu in $(gpu_ids); do
         if ! is_locked "$gpu"; then
             local bypass_pids; bypass_pids="$(untracked_pids "$gpu")" || true
