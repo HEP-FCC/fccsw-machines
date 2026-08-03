@@ -138,6 +138,19 @@ journal, so you don't have to hand-roll the `journalctl -u
 domestikos.service` query yourself. Doesn't require root (though
 `domestikos` as a whole is meant to be run as one).
 
+```
+domestikos usage                # per-user job count + total GPU-time, last 7 days
+domestikos usage "30 days ago"  # or any journalctl --since value
+```
+
+Every `excubitor run` logs a `USAGE` record (tag `excubitor`, e.g. via
+`journalctl -t excubitor`) when a job releases its GPU(s), recording the
+user, GPU(s), duration, and command. `domestikos usage` aggregates those
+into a per-user table of job count and total GPU-time, plus a grand
+total. Reading other users' journal entries typically requires root or
+`systemd-journal` group membership, so in practice this is an admin-only
+view even though the command itself doesn't enforce it.
+
 ### Support
 
 Problems should be reported to the administrators via the "FCC SW Machines"

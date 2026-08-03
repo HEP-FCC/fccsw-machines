@@ -28,7 +28,7 @@ is_help() { [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; }
 
 print_usage() {
     cat <<'EOF'
-usage: domestikos {gc|status|check|offenders} ...
+usage: domestikos {gc|status|check|offenders|usage} ...
 
   domestikos gc                  # force-clear stale locks/meta, any user
   domestikos status               # same view as `excubitor status`
@@ -36,9 +36,17 @@ usage: domestikos {gc|status|check|offenders} ...
                                   # (used by domestikos.timer; safe to run by hand)
   domestikos offenders [<since>]  # show `check`'s bypass warnings from the
                                   # journal (default: last 24h)
+  domestikos usage [<since>]      # per-user job count + total GPU-time
+                                  # (default: last 7 days)
 
 Run 'domestikos <command> -h' for details on a specific command.
 EOF
+}
+
+# $1: seconds -> "HhMMmSSs".
+fmt_duration() {
+    local s="$1"
+    printf "%dh%02dm%02ds" $((s / 3600)) $(((s % 3600) / 60)) $((s % 60))
 }
 
 require_root() {
@@ -153,12 +161,54 @@ EOF
     journalctl -u domestikos.service --since "${since}" -g "untracked usage" --no-pager || true
 }
 
+cmd_usage() {
+    if is_help "${1:-}"; then
+        cat <<'EOF'
+usage: domestikos usage [<since>]
+
+Per-user job count and total GPU-time, aggregated from the USAGE records
+`excubitor run` logs to the journal (tag `excubitor`) each time a job
+releases its GPU(s). <since> is any journalctl --since value (default:
+'7 days ago').
+
+Examples:
+  domestikos usage
+  domestikos usage "30 days ago"
+EOF
+        exit 0
+    fi
+
+    local since="${1:-7 days ago}"
+    local records
+    # journalctl itself exits 1 when nothing matched -- not a real error.
+    records="$(journalctl -t excubitor --since "${since}" -g '^USAGE\|' -o cat --no-pager 2>/dev/null || true)"
+
+    if [[ -z "$records" ]]; then
+        echo "No usage records found since '${since}'."
+        return 0
+    fi
+
+    printf "%-12s %-8s %s\n" "USER" "JOBS" "TOTAL GPU-TIME"
+    local grand_jobs=0 grand_secs=0 user jobs secs
+    while read -r user jobs secs; do
+        [[ -z "$user" ]] && continue
+        printf "%-12s %-8s %s\n" "$user" "$jobs" "$(fmt_duration "$secs")"
+        grand_jobs=$((grand_jobs + jobs))
+        grand_secs=$((grand_secs + secs))
+    done < <(
+        awk -F'|' '{ count[$2]++; total[$2] += $4 } END { for (u in count) print u, count[u], total[u] }' <<< "$records" \
+            | sort -k3 -n -r
+    )
+    printf "%-12s %-8s %s\n" "TOTAL" "$grand_jobs" "$(fmt_duration "$grand_secs")"
+}
+
 case "${1:-}" in
     -h|--help|help) print_usage; exit 0 ;;
     gc) shift; cmd_gc "$@" ;;
     status) shift; cmd_status "$@" ;;
     check) shift; cmd_check "$@" ;;
     offenders) shift; cmd_offenders "$@" ;;
+    usage) shift; cmd_usage "$@" ;;
     *)
         print_usage >&2
         exit 1

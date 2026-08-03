@@ -166,6 +166,8 @@ EOF
     # not `local`: still read by cleanup() when it runs as the EXIT trap,
     # by which point cmd_run has already returned and its locals are gone.
     cvd=$(IFS=,; echo "${gpu_arr[*]}")
+    run_cmd="$*"
+    start_epoch=$(date +%s)
     echo "[excubitor] acquired GPU(s): ${cvd}  (user=${USER} pid=$$)"
 
     cleanup() {
@@ -179,6 +181,13 @@ EOF
         for gpu in "${HELD_GPUS[@]}"; do
             clear_meta "$gpu"
         done
+        # Best-effort usage record for `domestikos usage` -- pipe-delimited
+        # so it's trivial to parse back out of `journalctl -o cat`. Never
+        # let a missing/broken logger take down an otherwise-successful job.
+        if command -v logger >/dev/null 2>&1; then
+            local duration=$(( $(date +%s) - start_epoch ))
+            logger -t excubitor "USAGE|${USER}|${cvd}|${duration}|${run_cmd}" 2>/dev/null || true
+        fi
         echo "[excubitor] released GPU(s): ${cvd}"
     }
     trap cleanup EXIT INT TERM
