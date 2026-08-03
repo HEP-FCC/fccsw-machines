@@ -57,6 +57,7 @@ acquire_n() {
     local n="$1"
     local timeout="$2"
     local deadline=0
+    local waiting_notice_shown=0
     if [[ "$timeout" -gt 0 ]]; then
         deadline=$(( $(date +%s) + timeout ))
     fi
@@ -93,6 +94,16 @@ acquire_n() {
             echo "ERROR: timed out waiting for ${n} free GPU(s)" >&2
             return 1
         fi
+
+        if [[ "$waiting_notice_shown" -eq 0 ]]; then
+            if [[ "$timeout" -gt 0 ]]; then
+                echo "[excubitor] no free GPU(s) right now -- waiting for ${n} to become free (timeout ${timeout}s, checking every 5s, Ctrl-C to abort)..." >&2
+            else
+                echo "[excubitor] no free GPU(s) right now -- waiting for ${n} to become free (checking every 5s, Ctrl-C to abort)..." >&2
+            fi
+            waiting_notice_shown=1
+        fi
+
         sleep 5
     done
 }
