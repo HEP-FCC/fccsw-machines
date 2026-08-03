@@ -87,6 +87,11 @@ excubitor status
 excubitor run -n <num_gpus> [-t <timeout_sec>] -- <command...>
 ```
 
+`excubitor -v`/`--version` and `domestikos -v`/`--version` print the
+installed version (both share one version number, defined in
+`lib/excubitor-common.sh`, since they're always installed/updated
+together).
+
 ```
 excubitor run -n 1 -- python train.py
 excubitor run -n 2 -t 600 -- python train_multi.py

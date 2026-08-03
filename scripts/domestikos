@@ -29,6 +29,7 @@ is_help() { [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; }
 print_usage() {
     cat <<'EOF'
 usage: domestikos {gc|status|check|offenders|usage} ...
+       domestikos -v | --version
 
   domestikos gc                  # force-clear stale locks/meta, any user
   domestikos status               # same view as `excubitor status`
@@ -204,6 +205,7 @@ EOF
 
 case "${1:-}" in
     -h|--help|help) print_usage; exit 0 ;;
+    -v|--version|version) echo "domestikos ${EXCUBITOR_VERSION}"; exit 0 ;;
     gc) shift; cmd_gc "$@" ;;
     status) shift; cmd_status "$@" ;;
     check) shift; cmd_check "$@" ;;

@@ -28,6 +28,7 @@ is_help() { [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; }
 print_usage() {
     cat <<'EOF'
 usage: excubitor {run|status|clean} ...
+       excubitor -v | --version
 
   excubitor status
   excubitor run -n <num_gpus> [-t <timeout_sec>] -- <command...>
@@ -244,6 +245,7 @@ EOF
 
 case "${1:-}" in
     -h|--help|help) print_usage; exit 0 ;;
+    -v|--version|version) echo "excubitor ${EXCUBITOR_VERSION}"; exit 0 ;;
     run) shift; cmd_run "$@" ;;
     status) shift; cmd_status "$@" ;;
     clean) shift; cmd_clean "$@" ;;
