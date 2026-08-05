@@ -159,6 +159,11 @@ this same cleanup silently as a side effect; `clean` is for when you
 want to trigger it explicitly and see confirmation. Only affects entries
 you own -- another user's leftovers need `domestikos gc`.
 
+Both commands have bash tab completion for subcommands and flags
+(installed via `make install`/the RPM into bash-completion's completions
+dir; requires the `bash-completion` package to be installed for it to
+actually load).
+
 ### Admin maintenance
 
 ```

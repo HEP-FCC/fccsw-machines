@@ -1,0 +1,52 @@
+# bash completion for excubitor and domestikos.
+#
+# Installed under bash-completion's completions dir as "excubitor"; the
+# Makefile also symlinks "domestikos" to this same file so bash-completion's
+# dynamic loader finds it regardless of which command is tab-completed
+# first (see `make install`/the RPM spec's %files).
+
+_excubitor_gpu_commands() {
+    local cur prev words cword
+    _init_completion || return
+
+    if [[ "$cword" -eq 1 ]]; then
+        COMPREPLY=($(compgen -W "run status clean -h --help -v --version" -- "$cur"))
+        return
+    fi
+
+    if [[ "${words[1]}" != "run" ]]; then
+        COMPREPLY=($(compgen -W "-h --help" -- "$cur"))
+        return
+    fi
+
+    # Everything after a bare "--" is the wrapped <command...>, not
+    # excubitor's own flags -- hand completion off to it instead.
+    local i
+    for ((i = 2; i < cword; i++)); do
+        if [[ "${words[i]}" == "--" ]]; then
+            COMPREPLY=($(compgen -c -- "$cur"))
+            _filedir
+            return
+        fi
+    done
+
+    case "$prev" in
+        -n|-t) return ;;
+    esac
+    COMPREPLY=($(compgen -W "-n -t -h --help --" -- "$cur"))
+}
+
+_domestikos_gpu_commands() {
+    local cur prev words cword
+    _init_completion || return
+
+    if [[ "$cword" -eq 1 ]]; then
+        COMPREPLY=($(compgen -W "gc status check offenders usage -h --help -v --version" -- "$cur"))
+        return
+    fi
+
+    COMPREPLY=($(compgen -W "-h --help" -- "$cur"))
+}
+
+complete -F _excubitor_gpu_commands excubitor
+complete -F _domestikos_gpu_commands domestikos

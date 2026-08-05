@@ -20,6 +20,9 @@ Requires:       bash, coreutils, util-linux, systemd
 Requires(post):   systemd
 Requires(preun):  systemd
 Requires(postun): systemd
+# Soft dep: tab completion works if bash-completion is present, but its
+# absence shouldn't block installing excubitor/domestikos.
+Recommends:     bash-completion
 
 %description
 excubitor/domestikos is a cooperative, flock-based lock manager for GPUs
@@ -48,7 +51,8 @@ make install \
     LIBEXECDIR=%{_libexecdir}/excubitor \
     TMPFILES_CONF=%{_tmpfilesdir}/excubitor.conf \
     SYSTEMD_UNIT_DIR=%{_unitdir} \
-    PROFILED_DIR=%{_sysconfdir}/profile.d
+    PROFILED_DIR=%{_sysconfdir}/profile.d \
+    BASH_COMPLETION_DIR=%{_datadir}/bash-completion/completions
 
 %post
 # Best-effort, same as `make install` on a non-packaged system: don't
@@ -87,8 +91,13 @@ fi
 %{_unitdir}/domestikos.service
 %{_unitdir}/domestikos.timer
 %{_sysconfdir}/profile.d/excubitor.sh
+%{_datadir}/bash-completion/completions/excubitor
+%{_datadir}/bash-completion/completions/domestikos
 
 %changelog
+* Wed Aug 05 2026 FCC SW Machines <fccsw-machines@cern.ch> - 0.1.2-1
+- Add bash tab completion for excubitor/domestikos
+
 * Wed Aug 05 2026 FCC SW Machines <fccsw-machines@cern.ch> - 0.1.1-1
 - Clarify -t as a giveup timer for the GPU-wait only, not a limit on the job
 

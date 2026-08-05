@@ -7,6 +7,7 @@ SYSTEMD_SERVICE := domestikos.service
 SYSTEMD_TIMER := domestikos.timer
 PROFILED_DIR ?= /etc/profile.d
 PROFILED_SCRIPT := excubitor.sh
+BASH_COMPLETION_DIR ?= $(PREFIX)/share/bash-completion/completions
 LOCK_DIR ?= /var/lock/excubitor
 
 # Staged install root for packaging (e.g. `make install DESTDIR=%{buildroot}`
@@ -43,6 +44,9 @@ install:
 	install -m 644 $(SCRIPT_DIR)/systemd/$(SYSTEMD_TIMER) $(DESTDIR)$(SYSTEMD_UNIT_DIR)/$(SYSTEMD_TIMER)
 	install -d $(DESTDIR)$(PROFILED_DIR)
 	install -m 644 $(SCRIPT_DIR)/profile.d/$(PROFILED_SCRIPT) $(DESTDIR)$(PROFILED_DIR)/$(PROFILED_SCRIPT)
+	install -d $(DESTDIR)$(BASH_COMPLETION_DIR)
+	install -m 644 $(SCRIPT_DIR)/completions/excubitor $(DESTDIR)$(BASH_COMPLETION_DIR)/excubitor
+	ln -sf excubitor $(DESTDIR)$(BASH_COMPLETION_DIR)/domestikos
 ifeq ($(DESTDIR),)
 	systemd-tmpfiles --create $(TMPFILES_CONF)
 	systemctl daemon-reload
@@ -59,6 +63,7 @@ uninstall:
 	rm -f $(SYSTEMD_UNIT_DIR)/$(SYSTEMD_SERVICE) $(SYSTEMD_UNIT_DIR)/$(SYSTEMD_TIMER)
 	systemctl daemon-reload
 	rm -f $(PROFILED_DIR)/$(PROFILED_SCRIPT)
+	rm -f $(BASH_COMPLETION_DIR)/excubitor $(BASH_COMPLETION_DIR)/domestikos
 	@echo "Note: $(LOCK_DIR) was left in place in case jobs are still using it."
 	@echo "Note: current GPU compute mode was left as-is; it will revert to the driver default on the next reboot since the timer is gone."
 
@@ -70,6 +75,7 @@ dist:
 	mkdir -p /tmp/$(DIST_NAME)
 	cp -a $(SCRIPT_DIR)/excubitor $(SCRIPT_DIR)/domestikos $(SCRIPT_DIR)/Makefile \
 	      $(SCRIPT_DIR)/lib $(SCRIPT_DIR)/systemd $(SCRIPT_DIR)/profile.d $(SCRIPT_DIR)/tmpfiles.d \
+	      $(SCRIPT_DIR)/completions \
 	      /tmp/$(DIST_NAME)/
 	tar -C /tmp -czf $(SCRIPT_DIR)/$(DIST_NAME).tar.gz $(DIST_NAME)
 	rm -rf /tmp/$(DIST_NAME)
