@@ -4,4 +4,4 @@ After=multi-user.target
 
 [Service]
 Type=oneshot
-ExecStart=/usr/local/bin/domestikos check
+ExecStart=@BINDIR@/domestikos check

@@ -9,28 +9,46 @@ PROFILED_DIR ?= /etc/profile.d
 PROFILED_SCRIPT := excubitor.sh
 LOCK_DIR ?= /var/lock/excubitor
 
-SCRIPT_DIR := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
+# Staged install root for packaging (e.g. `make install DESTDIR=%{buildroot}`
+# from the RPM spec). Left empty for a normal `sudo make install`, which
+# installs straight onto the running system.
+DESTDIR ?=
 
-.PHONY: install uninstall
+SCRIPT_DIR := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
+VERSION := $(shell sed -n 's/^EXCUBITOR_VERSION="\(.*\)"$$/\1/p' $(SCRIPT_DIR)/lib/excubitor-common.sh)
+DIST_NAME := excubitor-$(VERSION)
+
+.PHONY: install uninstall dist rpm
 
 # Copies (not symlinks) into $(LIBEXECDIR): the repo may live somewhere
 # unprivileged users can't traverse (e.g. under /root), so bin/ and its
 # real targets both need to live under a publicly reachable prefix.
 install:
-	install -d $(LIBEXECDIR)/lib
-	install -m 755 $(SCRIPT_DIR)/excubitor $(LIBEXECDIR)/excubitor
-	install -m 755 $(SCRIPT_DIR)/domestikos $(LIBEXECDIR)/domestikos
-	install -m 644 $(SCRIPT_DIR)/lib/excubitor-common.sh $(LIBEXECDIR)/lib/excubitor-common.sh
-	ln -sf $(LIBEXECDIR)/excubitor $(BINDIR)/excubitor
-	ln -sf $(LIBEXECDIR)/domestikos $(BINDIR)/domestikos
-	install -m 644 $(SCRIPT_DIR)/tmpfiles.d/excubitor.conf $(TMPFILES_CONF)
+	install -d $(DESTDIR)$(LIBEXECDIR)/lib
+	install -m 755 $(SCRIPT_DIR)/excubitor $(DESTDIR)$(LIBEXECDIR)/excubitor
+	install -m 755 $(SCRIPT_DIR)/domestikos $(DESTDIR)$(LIBEXECDIR)/domestikos
+	install -m 644 $(SCRIPT_DIR)/lib/excubitor-common.sh $(DESTDIR)$(LIBEXECDIR)/lib/excubitor-common.sh
+	install -d $(DESTDIR)$(BINDIR)
+	ln -sf $(LIBEXECDIR)/excubitor $(DESTDIR)$(BINDIR)/excubitor
+	ln -sf $(LIBEXECDIR)/domestikos $(DESTDIR)$(BINDIR)/domestikos
+	install -d $(DESTDIR)$(dir $(TMPFILES_CONF))
+	install -m 644 $(SCRIPT_DIR)/tmpfiles.d/excubitor.conf $(DESTDIR)$(TMPFILES_CONF)
+	install -d $(DESTDIR)$(SYSTEMD_UNIT_DIR)
+	# .service is a template: it must ExecStart the *installed* domestikos
+	# path, which varies with BINDIR (/usr/local/bin for a manual install,
+	# /usr/bin when packaged as an RPM) -- a plain `install` would silently
+	# bake in whatever path the template happened to hardcode.
+	sed 's|@BINDIR@|$(BINDIR)|' $(SCRIPT_DIR)/systemd/$(SYSTEMD_SERVICE).in > $(DESTDIR)$(SYSTEMD_UNIT_DIR)/$(SYSTEMD_SERVICE)
+	chmod 644 $(DESTDIR)$(SYSTEMD_UNIT_DIR)/$(SYSTEMD_SERVICE)
+	install -m 644 $(SCRIPT_DIR)/systemd/$(SYSTEMD_TIMER) $(DESTDIR)$(SYSTEMD_UNIT_DIR)/$(SYSTEMD_TIMER)
+	install -d $(DESTDIR)$(PROFILED_DIR)
+	install -m 644 $(SCRIPT_DIR)/profile.d/$(PROFILED_SCRIPT) $(DESTDIR)$(PROFILED_DIR)/$(PROFILED_SCRIPT)
+ifeq ($(DESTDIR),)
 	systemd-tmpfiles --create $(TMPFILES_CONF)
-	install -m 644 $(SCRIPT_DIR)/systemd/$(SYSTEMD_SERVICE) $(SYSTEMD_UNIT_DIR)/$(SYSTEMD_SERVICE)
-	install -m 644 $(SCRIPT_DIR)/systemd/$(SYSTEMD_TIMER) $(SYSTEMD_UNIT_DIR)/$(SYSTEMD_TIMER)
 	systemctl daemon-reload
 	systemctl enable --now $(SYSTEMD_TIMER)
 	systemctl start $(SYSTEMD_SERVICE) || echo "WARN: initial $(SYSTEMD_SERVICE) run failed -- likely a GPU is currently in use; it will retry on the next timer tick, or run 'systemctl start $(SYSTEMD_SERVICE)' once idle" >&2
-	install -m 644 $(SCRIPT_DIR)/profile.d/$(PROFILED_SCRIPT) $(PROFILED_DIR)/$(PROFILED_SCRIPT)
+endif
 
 uninstall:
 	rm -f $(BINDIR)/excubitor $(BINDIR)/domestikos
@@ -43,3 +61,22 @@ uninstall:
 	rm -f $(PROFILED_DIR)/$(PROFILED_SCRIPT)
 	@echo "Note: $(LOCK_DIR) was left in place in case jobs are still using it."
 	@echo "Note: current GPU compute mode was left as-is; it will revert to the driver default on the next reboot since the timer is gone."
+
+# Source tarball for `rpmbuild`: just this directory (excubitor/domestikos
+# don't need the rest of the fccsw-machines repo), renamed to the
+# name-version/ layout rpmbuild's %prep expects.
+dist:
+	rm -rf /tmp/$(DIST_NAME) $(SCRIPT_DIR)/$(DIST_NAME).tar.gz
+	mkdir -p /tmp/$(DIST_NAME)
+	cp -a $(SCRIPT_DIR)/excubitor $(SCRIPT_DIR)/domestikos $(SCRIPT_DIR)/Makefile \
+	      $(SCRIPT_DIR)/lib $(SCRIPT_DIR)/systemd $(SCRIPT_DIR)/profile.d $(SCRIPT_DIR)/tmpfiles.d \
+	      /tmp/$(DIST_NAME)/
+	tar -C /tmp -czf $(SCRIPT_DIR)/$(DIST_NAME).tar.gz $(DIST_NAME)
+	rm -rf /tmp/$(DIST_NAME)
+
+rpm: dist
+	rpmbuild --define "_topdir $(SCRIPT_DIR)/rpmbuild" \
+	         --define "_sourcedir $(SCRIPT_DIR)" \
+	         --define "version $(VERSION)" \
+	         -bb $(SCRIPT_DIR)/packaging/excubitor.spec
+	@echo "RPM(s) under $(SCRIPT_DIR)/rpmbuild/RPMS/"

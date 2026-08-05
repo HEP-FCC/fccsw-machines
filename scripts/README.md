@@ -80,6 +80,43 @@ only on the next reboot, since the timer that re-applies it is gone.
 Both `PREFIX` (default `/usr/local`) and `BINDIR`/`LIBEXECDIR` can be
 overridden, e.g. `make install PREFIX=/opt`.
 
+### Installation via RPM (alternative to `make install`)
+
+`scripts/packaging/excubitor.spec` packages the same install as an RPM,
+so `dnf`/`rpm` track every file instead of `make install` writing
+straight onto the system. It installs to the standard `/usr` paths
+(`/usr/bin`, `/usr/libexec/excubitor`, ...) rather than `/usr/local` —
+don't mix the two install methods on one host; if a node was previously
+set up with `make install`, run `sudo make -C ~/fccsw-machines/scripts
+uninstall` first.
+
+Build (needs `rpm-build`; run from a checkout, not as root):
+
+```
+make -C ~/fccsw-machines/scripts rpm
+```
+
+This drops `excubitor-<version>-1.<dist>.noarch.rpm` under
+`scripts/rpmbuild/RPMS/noarch/`. Install/upgrade/remove with normal
+package-manager commands:
+
+```
+sudo dnf install ./excubitor-0.1.0-1.el9.noarch.rpm
+sudo dnf upgrade ./excubitor-0.1.0-1.el9.noarch.rpm   # after a version bump + rebuild
+sudo dnf remove excubitor
+```
+
+The package's `%post`/`%preun`/`%postun` scriptlets do exactly what
+`make install`/`uninstall` do by hand: apply the tmpfiles rule, enable
+and (best-effort) start `domestikos.timer`/`.service` on install, and
+stop/disable them on final removal (an upgrade leaves them running).
+Same caveat as `make install`: the first `domestikos check` run may
+warn and defer to the next timer tick if a GPU is already busy.
+
+The RPM's version comes from `EXCUBITOR_VERSION` in
+`lib/excubitor-common.sh` (also what `excubitor -v`/`domestikos -v`
+print) — bump that when cutting a new release, then re-run `make rpm`.
+
 ### Usage
 
 ```
