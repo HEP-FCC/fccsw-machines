@@ -31,7 +31,7 @@ usage: excubitor {run|status|clean} ...
        excubitor -v | --version
 
   excubitor status
-  excubitor run -n <num_gpus> [-t <timeout_sec>] -- <command...>
+  excubitor run -n <num_gpus> [-t <giveup_sec>] -- <command...>
   excubitor clean
 
 Examples:
@@ -117,11 +117,12 @@ write_meta() {
 cmd_run() {
     if is_help "${1:-}"; then
         cat <<'EOF'
-usage: excubitor run -n <num_gpus> [-t <timeout_sec>] -- <command...>
+usage: excubitor run -n <num_gpus> [-t <giveup_sec>] -- <command...>
 
-Acquire <num_gpus> free GPU(s) (waiting up to <timeout_sec> seconds, or
-forever if omitted/0), set CUDA_VISIBLE_DEVICES for <command>, run it,
-and release the GPU(s) when it exits.
+Acquire <num_gpus> free GPU(s) (giving up after <giveup_sec> seconds if
+none free up, or waiting forever if omitted/0 -- this does not bound
+<command...>'s runtime, only the wait via -t), run it, and release the
+GPU(s) when it exits.
 
 Examples:
   excubitor run -n 1 -- python train.py
@@ -144,7 +145,7 @@ EOF
     shift $((OPTIND - 1))
     if [[ "${1:-}" == "--" ]]; then shift; fi
     if [[ "$#" -eq 0 ]]; then
-        echo "usage: excubitor run -n <num_gpus> [-t <timeout_sec>] -- <command...>" >&2
+        echo "usage: excubitor run -n <num_gpus> [-t <giveup_sec>] -- <command...>" >&2
         exit 1
     fi
 

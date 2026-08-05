@@ -89,5 +89,8 @@ fi
 %{_sysconfdir}/profile.d/excubitor.sh
 
 %changelog
+* Wed Aug 05 2026 FCC SW Machines <fccsw-machines@cern.ch> - 0.1.1-1
+- Clarify -t as a giveup timer for the GPU-wait only, not a limit on the job
+
 * Tue Aug 04 2026 FCC SW Machines <fccsw-machines@cern.ch> - 0.1.0-1
 - Initial RPM package

@@ -9,7 +9,7 @@ LOCK_DIR="/var/lock/excubitor"
 # Shared by excubitor and domestikos -- both live in this repo and are
 # always installed/updated together (see scripts/Makefile), so one
 # version number for the pair is enough. Bump by hand on notable changes.
-EXCUBITOR_VERSION="0.1.0"
+EXCUBITOR_VERSION="0.1.1"
 
 # Always detect the real GPU count so the same install works unmodified
 # across hosts with different GPU counts (e.g. 4x A100 vs. Tesla T4

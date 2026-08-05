@@ -121,13 +121,17 @@ print) — bump that when cutting a new release, then re-run `make rpm`.
 
 ```
 excubitor status
-excubitor run -n <num_gpus> [-t <timeout_sec>] -- <command...>
+excubitor run -n <num_gpus> [-t <giveup_sec>] -- <command...>
 ```
 
 `excubitor -v`/`--version` and `domestikos -v`/`--version` print the
 installed version (both share one version number, defined in
 `lib/excubitor-common.sh`, since they're always installed/updated
 together).
+
+`-t <giveup_sec>` is a giveup timer for the wait when no GPU is free
+yet (0/omitted = wait forever); it does not bound how long `<command...>`
+itself is allowed to run once GPU(s) are acquired.
 
 ```
 excubitor run -n 1 -- python train.py
