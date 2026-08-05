@@ -117,6 +117,12 @@ The RPM's version comes from `EXCUBITOR_VERSION` in
 `lib/excubitor-common.sh` (also what `excubitor -v`/`domestikos -v`
 print) — bump that when cutting a new release, then re-run `make rpm`.
 
+Pushing a `vX.Y.Z` tag matching `EXCUBITOR_VERSION` triggers
+`.github/workflows/rpm-release.yml`, which builds the RPM (in an
+AlmaLinux 9 container, matching the target nodes) and attaches it to a
+GitHub release for that tag. The workflow fails if the tag and
+`EXCUBITOR_VERSION` don't match.
+
 ### Usage
 
 ```

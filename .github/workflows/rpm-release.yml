@@ -1,0 +1,41 @@
+name: Build and publish excubitor RPM
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  rpm:
+    runs-on: ubuntu-latest
+    # AlmaLinux 9 matches the target GPU nodes (see scripts/README.md), so
+    # the built RPM's %{?dist} tag (el9) matches what's actually deployed.
+    container: almalinux:9
+    steps:
+      - name: Install build dependencies
+        run: dnf install -y make rpm-build git
+
+      - uses: actions/checkout@v4
+
+      - name: Check tag matches EXCUBITOR_VERSION
+        run: |
+          tag_version="${GITHUB_REF_NAME#v}"
+          src_version="$(sed -n 's/^EXCUBITOR_VERSION="\(.*\)"$/\1/p' scripts/lib/excubitor-common.sh)"
+          if [ "$tag_version" != "$src_version" ]; then
+            echo "::error::tag v${tag_version} does not match EXCUBITOR_VERSION (${src_version}) in scripts/lib/excubitor-common.sh"
+            exit 1
+          fi
+
+      - name: Build RPM
+        run: make -C scripts rpm
+
+      - name: Publish GitHub release
+        uses: softprops/action-gh-release@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          files: scripts/rpmbuild/RPMS/noarch/*.rpm
+          generate_release_notes: true
