@@ -113,7 +113,37 @@ untracked_owners() {
     echo "${owners[*]}"
 }
 
+# Width (in columns) of everything the status() format string prints
+# before the final free-form field: 5 fixed-width columns (6+10+12+8+20)
+# plus the 5 single-space separators between all 6 columns.
+STATUS_PREFIX_WIDTH=61
+
+# Truncate $1 to fit in $2 columns, marking truncation with a trailing
+# "...". Only called on the last (CMD-like) column of status() output,
+# which is the one field whose length is arbitrary -- it's a user-
+# supplied command line, so it's the one that actually clutters the
+# terminal on a long `excubitor run ...` invocation.
+truncate_field() {
+    local str="$1" max="$2"
+    if [[ "$max" -le 0 || "${#str}" -le "$max" ]]; then
+        echo "$str"
+    elif [[ "$max" -le 3 ]]; then
+        echo "${str:0:max}"
+    else
+        echo "${str:0:max-3}..."
+    fi
+}
+
 status() {
+    # Only truncate for an interactive terminal -- piping/redirecting
+    # output (e.g. to a file or `grep`) should still get the full,
+    # untruncated command lines.
+    local avail=0
+    if [[ -t 1 ]]; then
+        local cols; cols="$(tput cols 2>/dev/null || echo "${COLUMNS:-0}")"
+        avail=$((cols - STATUS_PREFIX_WIDTH))
+    fi
+
     printf "%-6s %-10s %-12s %-8s %-20s %s\n" "GPU" "STATE" "USER" "PID" "SINCE" "CMD"
     for gpu in $(gpu_ids); do
         local mf; mf="$(meta_file "$gpu")"
@@ -125,7 +155,7 @@ status() {
                 lsince=$(cut -d'|' -f3 "$mf")
                 lcmd=$(cut -d'|' -f4- "$mf")
                 if kill -0 "$lpid" 2>/dev/null; then
-                    printf "%-6s %-10s %-12s %-8s %-20s %s\n" "$gpu" "BUSY" "$luser" "$lpid" "$lsince" "$lcmd"
+                    printf "%-6s %-10s %-12s %-8s %-20s %s\n" "$gpu" "BUSY" "$luser" "$lpid" "$lsince" "$(truncate_field "$lcmd" "$avail")"
                 else
                     printf "%-6s %-10s %-12s %-8s %-20s %s\n" "$gpu" "STALE" "$luser" "$lpid" "$lsince" "(process gone)"
                 fi
