@@ -48,16 +48,23 @@ run until this has been done at least once.
 `make install` also installs `systemd/domestikos.service` +
 `systemd/domestikos.timer` and starts the timer, which runs `domestikos
 check` once now, again ~1 minute after every boot, and every 5 minutes
-after that. Each run does two things:
+after that. Each run does three things:
 
 - best-effort (re-)assert `nvidia-smi -c EXCLUSIVE_PROCESS` (GPU compute
   mode, like the lock dir, resets on reboot and isn't backed by any file
   that would otherwise survive it) — silently, since this normally fails
   once any GPU has an active process, which is the steady state after the
   first successful run;
-- check every GPU `excubitor` considers free for actual driver-visible
-  usage, and log a `WARN` line (visible via `journalctl -u
-  domestikos.service`) for any bypass found.
+- check the GPU's actual resulting compute mode and log a `WARN` if it's
+  still not `EXCLUSIVE_PROCESS` — the assert above gives no feedback
+  either way, so this is the only way to notice a GPU stuck in another
+  mode (e.g. changed by someone with root, then unable to be reasserted
+  for as long as any process holds a context in that wrong mode);
+- check every GPU for a bypass and log a `WARN` line (visible via
+  `journalctl -u domestikos.service`) if found: for a GPU `excubitor`
+  considers free, any driver-visible usage at all is a bypass; for a GPU
+  it considers locked, usage by anyone other than the lock's owner is a
+  bypass sharing a GPU with a legitimate job.
 
 The very first run happens synchronously during `make install`; if it
 fails (e.g. a GPU is already in use), `make install` warns rather than

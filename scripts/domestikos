@@ -100,9 +100,14 @@ cmd_check() {
 usage: domestikos check
 
 Best-effort (re-)assert `nvidia-smi -c EXCLUSIVE_PROCESS`, and log a WARN
-line (see `domestikos offenders`) for any GPU excubitor considers free
-but the driver shows as actively in use -- i.e. a bypass. Run
-periodically by domestikos.timer; safe to run by hand any time.
+line (see `domestikos offenders`) for any bypass: a GPU excubitor
+considers free but the driver shows in use, a GPU excubitor considers
+locked that the driver shows in use by someone other than the lock
+holder, or a GPU whose actual compute mode isn't EXCLUSIVE_PROCESS (the
+assert above is silent, so this is the only way to notice it didn't
+take -- e.g. it was blocked by a process already holding a context in
+some other mode). Run periodically by domestikos.timer; safe to run by
+hand any time.
 EOF
         exit 0
     fi
@@ -117,6 +122,23 @@ EOF
     # time, surfaced by `make install`) is worth flagging if it fails.
     if command -v nvidia-smi >/dev/null 2>&1; then
         nvidia-smi -c EXCLUSIVE_PROCESS >/dev/null 2>&1 || true
+    fi
+
+    # The assert above gives no feedback either way, so a GPU stuck
+    # outside EXCLUSIVE_PROCESS (e.g. changed by someone with root, then
+    # unable to be reasserted for as long as any process holds a context
+    # in the wrong mode) would otherwise go unnoticed indefinitely --
+    # letting multiple processes share one GPU's memory with none of the
+    # bypass checks below ever tripping, since none of them rely on
+    # compute mode being right in the first place. Check the actual
+    # resulting mode and log it if it's still wrong.
+    if command -v nvidia-smi >/dev/null 2>&1; then
+        for gpu in $(gpu_ids); do
+            local mode; mode="$(nvidia-smi -i "$gpu" --query-gpu=compute_mode --format=csv,noheader 2>/dev/null)" || true
+            if [[ -n "$mode" && "$mode" != "Exclusive_Process" ]]; then
+                echo "WARN: GPU ${gpu} compute mode is '${mode}', not Exclusive_Process -- untracked usage checks below can't be relied on until this is fixed" >&2
+            fi
+        done
     fi
 
     # Self-heal lock file permissions: whichever user/process opens a
@@ -137,6 +159,37 @@ EOF
             if [[ -n "$bypass_pids" ]]; then
                 local bypass_users; bypass_users="$(untracked_owners "$bypass_pids")" || true
                 echo "WARN: GPU ${gpu} has untracked usage -- user(s)=${bypass_users} pid(s)=${bypass_pids}" >&2
+            fi
+        else
+            # Locked only proves *an* excubitor job owns this GPU, not that
+            # it's the only thing running on it -- a bypasser can still
+            # attach directly alongside a legitimate lock holder, and the
+            # check above would never see it (it only looks at GPUs
+            # excubitor considers free). Compare driver-visible process
+            # owners against the lock's owner, not PIDs: the meta file
+            # records excubitor's own wrapper PID ($$ in write_meta), not
+            # the launched job's PID, so PIDs never match even in the
+            # fully legitimate case.
+            local mf; mf="$(meta_file "$gpu")"
+            if [[ -f "$mf" ]]; then
+                local luser; luser="$(cut -d'|' -f1 "$mf")"
+                local driver_pids; driver_pids="$(untracked_pids "$gpu")" || true
+                if [[ -n "$driver_pids" ]]; then
+                    local driver_owners; driver_owners="$(untracked_owners "$driver_pids")" || true
+                    local foreign=0 owner_arr owner
+                    IFS=',' read -ra owner_arr <<< "$driver_owners"
+                    for owner in "${owner_arr[@]}"; do
+                        # "?" means the owner couldn't be resolved (e.g. the
+                        # pid already exited between the two nvidia-smi/ps
+                        # calls) -- not evidence of a foreign user, so it
+                        # must not trip the warning on its own.
+                        [[ "$owner" == "?" || "$owner" == "$luser" ]] && continue
+                        foreign=1
+                    done
+                    if [[ "$foreign" -eq 1 ]]; then
+                        echo "WARN: GPU ${gpu} has untracked usage -- locked by ${luser}, but driver also shows user(s)=${driver_owners} pid(s)=${driver_pids}" >&2
+                    fi
+                fi
             fi
         fi
     done

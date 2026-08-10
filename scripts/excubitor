@@ -73,6 +73,19 @@ acquire_n() {
                 exit 1
             fi
             if flock -n -x "$fd"; then
+                # The flock alone only proves no *other excubitor* job has
+                # this GPU -- it says nothing about a process that attached
+                # directly, bypassing excubitor entirely. Cross-check the
+                # driver before handing the GPU out, or a bypasser who got
+                # there first would let us grant a "free" GPU that's
+                # actually occupied, dooming the caller's job to a CUDA
+                # init failure despite doing everything right.
+                local bypass_pids; bypass_pids="$(untracked_pids "$gpu")" || true
+                if [[ -n "$bypass_pids" ]]; then
+                    flock -u "$fd"
+                    exec {fd}>&-
+                    continue
+                fi
                 HELD_FDS+=("$fd")
                 HELD_GPUS+=("$gpu")
                 if [[ "${#HELD_GPUS[@]}" -eq "$n" ]]; then
