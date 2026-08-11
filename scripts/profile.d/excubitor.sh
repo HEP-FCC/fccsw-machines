@@ -12,10 +12,12 @@ cat <<'EOF'
 ================================================================
 
   excubitor status                                # see what's free
-  excubitor run -n <N> [-t <secs>] -- <command>   # run using N GPUs
+  excubitor run -n <N> [-t <secs>] -- <command>   # run using any N GPUs
+  excubitor run -g <id>[,<id>...] [-t <secs>] -- <command>  # specific GPU(s)
 
-  Example:
+  Examples:
     excubitor run -n 1 -- python train.py
+    excubitor run -g 0,2 -- python train.py
 
   Bypassing it on a free GPU can make a later `excubitor run` land on
   the same one and fail to start. Use excubitor every time.
