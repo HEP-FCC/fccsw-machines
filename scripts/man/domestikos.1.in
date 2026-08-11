@@ -1,0 +1,121 @@
+.TH DOMESTIKOS 1 "August 2026" "excubitor @VERSION@" "System Administration"
+.SH NAME
+domestikos \- admin commands for excubitor, the GPU lock manager
+.SH SYNOPSIS
+.B domestikos
+.I command
+.RI [ options "] ..."
+.br
+.B domestikos
+.RB { \-h | \-\-help }
+.br
+.B domestikos
+.RB { \-v | \-\-version }
+.SH DESCRIPTION
+.B domestikos
+is the admin\-only counterpart to
+.BR excubitor (1),
+named after the Domestikos ton Exkoubiton, the Byzantine officer who
+commanded the excubitores palace guard. Unless noted otherwise, its
+commands must be run as root.
+.PP
+It owns the things a regular user cannot do: force\-clearing another
+user's stale lock/meta files (never a lock still held by a live
+process \(em there is no force\-eviction of running jobs), and
+periodically enforcing GPU compute mode plus checking for
+.B excubitor
+bypass usage.
+.SH COMMANDS
+.TP
+.B gc
+Force\-clear stale (dead\-process) lock/meta files, for any user \(em
+the sticky bit on
+.I LOCK_DIR
+otherwise blocks a regular user from clearing anyone else's. Never
+touches a lock still held by a live process. Requires root.
+.TP
+.B status
+Same view as
+.BR "excubitor status" .
+.TP
+.B check
+Best\-effort (re\-)assert
+.B "nvidia\-smi \-c EXCLUSIVE_PROCESS"
+on every GPU, then log a WARN line for any bypass found:
+.RS
+.IP \(bu 3
+a GPU
+.B excubitor
+considers free but the driver shows in use;
+.IP \(bu 3
+a GPU
+.B excubitor
+considers locked that the driver shows in use by someone other than the
+lock holder;
+.IP \(bu 3
+a GPU whose actual compute mode isn't
+.BR EXCLUSIVE_PROCESS ,
+since the reassert above gives no feedback either way \(em this is the
+only way to notice it didn't take, e.g. because it was blocked by a
+process already holding a context in some other mode.
+.RE
+.IP
+WARN lines are visible via
+.BR "domestikos offenders" " or " "journalctl \-u domestikos.service" .
+Run periodically by
+.BR domestikos.timer ;
+safe to run by hand any time. Requires root.
+.TP
+.RI "offenders [" since ]
+Show
+.BR check 's
+bypass warnings from the systemd journal.
+.I since
+is any
+.BR journalctl (1)
+.B \-\-since
+value (default: "24 hours ago"). Does not require root.
+.TP
+.RI "usage [" since ]
+Per\-user job count and total GPU\-time, aggregated from the USAGE
+records
+.B excubitor run
+logs to the journal (tag
+.IR excubitor )
+each time a job releases its GPU(s).
+.I since
+is any
+.BR journalctl (1)
+.B \-\-since
+value (default: "7 days ago"). Reading other users' journal entries
+typically requires root or
+.B systemd\-journal
+group membership, so in practice this is an admin\-only view even
+though the command itself doesn't enforce it.
+.SH GLOBAL OPTIONS
+.TP
+.BR \-h ", " \-\-help
+Show usage. Also available per\-command, e.g.
+.BR "domestikos check \-h" .
+.TP
+.BR \-v ", " \-\-version
+Print the installed version.
+.SH FILES
+.TP
+.IR /var/lock/excubitor/gpu<N>.lock ", " gpu<N>.meta
+Per\-GPU lock/metadata files; see
+.BR excubitor (1).
+.SH EXAMPLES
+.EX
+domestikos check
+domestikos offenders "1 hour ago"
+domestikos usage "30 days ago"
+sudo domestikos gc
+.EE
+.SH SEE ALSO
+.BR excubitor (1),
+.BR nvidia\-smi (1),
+.BR journalctl (1)
+.SH BUGS
+Report problems to the administrators via the "FCC SW Machines"
+Mattermost channel: https://mattermost.web.cern.ch/fccsw/channels/fccsw-machines

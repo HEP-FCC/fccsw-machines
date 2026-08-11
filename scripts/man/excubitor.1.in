@@ -1,0 +1,135 @@
+.TH EXCUBITOR 1 "August 2026" "excubitor @VERSION@" "User Commands"
+.SH NAME
+excubitor \- cooperative GPU lock manager for a shared multi-GPU node
+.SH SYNOPSIS
+.B excubitor
+.I command
+.RI [ options "] ..."
+.br
+.B excubitor
+.RB { \-h | \-\-help }
+.br
+.B excubitor
+.RB { \-v | \-\-version }
+.SH DESCRIPTION
+.B excubitor
+is a cooperative, flock\-based lock manager for GPUs on a shared
+multi\-user node. Locks are per\-GPU\-index, backed by
+.BR flock (1)
+on files under
+.IR LOCK_DIR " (" /var/lock/excubitor ")."
+.PP
+This is COOPERATIVE only: it stops nothing at the kernel/driver level on
+its own. It only works if everyone uses
+.B excubitor
+instead of launching CUDA jobs directly. The node should also have
+NVIDIA's
+.B EXCLUSIVE_PROCESS
+compute mode enforced as a hard backstop, and
+.BR domestikos (1)'s
+periodic check running to catch and log anyone who bypasses
+.B excubitor
+anyway \(em see
+.BR domestikos (1)
+for the admin side of this.
+.SH COMMANDS
+.TP
+.BI "run " "{\-n <num_gpus>|\-g <gpu_id>[,<gpu_id>...]} [\-t <giveup_sec>] \-\- " command " ..."
+Acquire GPU(s) and run
+.IR command ,
+releasing them when it exits.
+.RS
+.TP
+.BI \-n " num_gpus"
+Request any
+.I num_gpus
+free GPUs. Defaults to 1 if neither
+.B \-n
+nor
+.B \-g
+is given.
+.TP
+.BI \-g " gpu_id[,gpu_id...]"
+Request specific GPU(s) by index instead of a count, e.g.
+.BR "\-g 0,2" .
+All of them must be free together \(em partial availability doesn't
+grant any of them, and the wait/give\-up behaviour below applies to the
+whole set. Mutually exclusive with
+.BR \-n .
+.TP
+.BI \-t " giveup_sec"
+Give up waiting after
+.I giveup_sec
+seconds if the requested GPU(s) don't free up (0 or omitted: wait
+forever). This only bounds the wait, not how long
+.I command
+itself is allowed to run once GPU(s) are acquired.
+.RE
+.TP
+.B status
+Show the state of every GPU: free; busy (with owning user, PID, time
+acquired, and command); stale (a lock left behind by a dead process,
+which this also clears as a side effect); or untracked (the driver
+shows an active process on a GPU
+.B excubitor
+considers free \(em i.e. someone bypassed it entirely). This is
+visibility only; nothing here stops or evicts an untracked process.
+.TP
+.B clean
+Clear your own stale (dead\-process) lock/meta files, e.g. left behind
+by a crashed job, and report how many were found.
+.B status
+already does this same cleanup silently as a side effect;
+.B clean
+is for when you want to trigger it explicitly and see confirmation.
+Only affects entries you own \(em
+.I LOCK_DIR
+is sticky, so another user's leftovers need
+.BR "domestikos gc" .
+.SH GLOBAL OPTIONS
+.TP
+.BR \-h ", " \-\-help
+Show usage. Also available per\-command, e.g.
+.BR "excubitor run \-h" .
+.TP
+.BR \-v ", " \-\-version
+Print the installed version.
+.SH ENVIRONMENT
+.B excubitor run
+sets
+.B CUDA_VISIBLE_DEVICES
+to the acquired GPU index(es), comma\-separated, for the duration of
+.IR command .
+.SH EXIT STATUS
+.B 0
+on success. Non\-zero if the requested GPU(s) couldn't be acquired
+(e.g. a
+.B \-t
+timeout), arguments are invalid, or
+.I command
+itself exits non\-zero.
+.SH FILES
+.TP
+.I /var/lock/excubitor/gpu<N>.lock
+Per\-GPU lock file backing
+.BR flock (1).
+.TP
+.I /var/lock/excubitor/gpu<N>.meta
+Per\-GPU metadata (owning user, PID, start time, command) shown by
+.B excubitor status
+while the corresponding lock is held.
+.SH EXAMPLES
+.EX
+excubitor run \-n 1 \-\- python train.py
+excubitor run \-n 2 \-t 600 \-\- python train_multi.py
+excubitor run \-g 0,2 \-\- python train.py
+excubitor status
+excubitor clean
+.EE
+.SH SEE ALSO
+.BR domestikos (1),
+.BR flock (1),
+.BR nvidia\-smi (1)
+.SH BUGS
+Report problems to the administrators via the "FCC SW Machines"
+Mattermost channel: https://mattermost.web.cern.ch/fccsw/channels/fccsw-machines

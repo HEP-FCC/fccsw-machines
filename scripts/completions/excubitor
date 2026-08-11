@@ -31,9 +31,9 @@ _excubitor_gpu_commands() {
     done
 
     case "$prev" in
-        -n|-t) return ;;
+        -n|-t|-g) return ;;
     esac
-    COMPREPLY=($(compgen -W "-n -t -h --help --" -- "$cur"))
+    COMPREPLY=($(compgen -W "-n -g -t -h --help --" -- "$cur"))
 }
 
 _domestikos_gpu_commands() {

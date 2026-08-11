@@ -52,7 +52,8 @@ make install \
     TMPFILES_CONF=%{_tmpfilesdir}/excubitor.conf \
     SYSTEMD_UNIT_DIR=%{_unitdir} \
     PROFILED_DIR=%{_sysconfdir}/profile.d \
-    BASH_COMPLETION_DIR=%{_datadir}/bash-completion/completions
+    BASH_COMPLETION_DIR=%{_datadir}/bash-completion/completions \
+    MANDIR=%{_mandir}
 
 %post
 # Best-effort, same as `make install` on a non-packaged system: don't
@@ -93,6 +94,8 @@ fi
 %{_sysconfdir}/profile.d/excubitor.sh
 %{_datadir}/bash-completion/completions/excubitor
 %{_datadir}/bash-completion/completions/domestikos
+%{_mandir}/man1/excubitor.1*
+%{_mandir}/man1/domestikos.1*
 
 %changelog
 * Wed Aug 05 2026 FCC SW Machines <fccsw-machines@cern.ch> - 0.1.2-1

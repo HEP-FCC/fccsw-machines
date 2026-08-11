@@ -32,11 +32,13 @@ usage: excubitor {run|status|clean} ...
 
   excubitor status
   excubitor run -n <num_gpus> [-t <giveup_sec>] -- <command...>
+  excubitor run -g <gpu_id>[,<gpu_id>...] [-t <giveup_sec>] -- <command...>
   excubitor clean
 
 Examples:
   excubitor run -n 1 -- python train.py
   excubitor run -n 2 -t 600 -- python train_multi.py
+  excubitor run -g 0,2 -- python train.py
   excubitor status
 
 Run 'excubitor <command> -h' for details on a specific command.
@@ -45,9 +47,12 @@ EOF
 
 # ---- locking -------------------------------------------------------------
 
-# Try to acquire exactly $1 GPUs. MUST be called directly (never via
-# command substitution / a pipeline) -- it must run in the caller's own
-# shell process, not a subshell, because the held fds (and thus the
+# Try to acquire $1 GPUs out of the candidate list given as the
+# remaining args (in order; -n passes all of gpu_ids() so any $1 of them
+# will do, -g passes exactly the requested GPU(s) so $1 == their count
+# and all of them must succeed together). MUST be called directly (never
+# via command substitution / a pipeline) -- it must run in the caller's
+# own shell process, not a subshell, because the held fds (and thus the
 # flock locks) are released the instant the process holding them exits.
 # On success, leaves the held gpu ids/fds in the global HELD_GPUS/HELD_FDS
 # arrays for the caller to hold for the lifetime of the process.
@@ -57,6 +62,8 @@ declare -a HELD_GPUS=()
 acquire_n() {
     local n="$1"
     local timeout="$2"
+    shift 2
+    local -a candidates=("$@")
     local deadline=0
     local waiting_notice_shown=0
     if [[ "$timeout" -gt 0 ]]; then
@@ -66,7 +73,7 @@ acquire_n() {
     while true; do
         HELD_FDS=()
         HELD_GPUS=()
-        for gpu in $(gpu_ids); do
+        for gpu in "${candidates[@]}"; do
             local lf; lf="$(lock_file "$gpu")"
             if ! open_lock_fd "$lf"; then
                 echo "ERROR: cannot open lock file for GPU ${gpu} (${lf}) -- contact the administrators on Mattermost, \"FCC SW Machines\": https://mattermost.web.cern.ch/fccsw/channels/fccsw-machines" >&2
@@ -96,7 +103,8 @@ acquire_n() {
             fi
         done
 
-        # not enough free GPUs right now: release what we grabbed, wait, retry
+        # not enough of the candidate GPU(s) free right now: release what
+        # we grabbed, wait, retry
         for fd in "${HELD_FDS[@]}"; do
             flock -u "$fd"
             exec {fd}>&-
@@ -104,16 +112,17 @@ acquire_n() {
         HELD_FDS=()
         HELD_GPUS=()
 
+        local candidates_csv; candidates_csv="$(IFS=,; echo "${candidates[*]}")"
         if [[ "$timeout" -gt 0 && "$(date +%s)" -ge "$deadline" ]]; then
-            echo "ERROR: timed out waiting for ${n} free GPU(s)" >&2
+            echo "ERROR: timed out waiting for ${n} of GPU(s) ${candidates_csv} to become free" >&2
             return 1
         fi
 
         if [[ "$waiting_notice_shown" -eq 0 ]]; then
             if [[ "$timeout" -gt 0 ]]; then
-                echo "[excubitor] no free GPU(s) right now -- waiting for ${n} to become free (timeout ${timeout}s, checking every 5s, Ctrl-C to abort)..." >&2
+                echo "[excubitor] no free GPU(s) right now -- waiting for ${n} of GPU(s) ${candidates_csv} to become free (timeout ${timeout}s, checking every 5s, Ctrl-C to abort)..." >&2
             else
-                echo "[excubitor] no free GPU(s) right now -- waiting for ${n} to become free (checking every 5s, Ctrl-C to abort)..." >&2
+                echo "[excubitor] no free GPU(s) right now -- waiting for ${n} of GPU(s) ${candidates_csv} to become free (checking every 5s, Ctrl-C to abort)..." >&2
             fi
             waiting_notice_shown=1
         fi
@@ -131,15 +140,19 @@ cmd_run() {
     if is_help "${1:-}"; then
         cat <<'EOF'
 usage: excubitor run -n <num_gpus> [-t <giveup_sec>] -- <command...>
+       excubitor run -g <gpu_id>[,<gpu_id>...] [-t <giveup_sec>] -- <command...>
 
-Acquire <num_gpus> free GPU(s) (giving up after <giveup_sec> seconds if
-none free up, or waiting forever if omitted/0 -- this does not bound
+Acquire GPU(s) (giving up after <giveup_sec> seconds if they don't free
+up, or waiting forever if omitted/0 -- this does not bound
 <command...>'s runtime, only the wait via -t), run it, and release the
-GPU(s) when it exits.
+GPU(s) when it exits. Request either -n <num_gpus> (any that many free
+GPUs) or -g <gpu_id>[,<gpu_id>...] (specific GPU(s) by index, e.g.
+"-g 0,2") -- mutually exclusive; -n defaults to 1 if neither is given.
 
 Examples:
   excubitor run -n 1 -- python train.py
   excubitor run -n 2 -t 600 -- python train_multi.py
+  excubitor run -g 0,2 -- python train.py
 EOF
         exit 0
     fi
@@ -147,31 +160,63 @@ EOF
     require_lock_dir
     require_gpu_count
 
-    local n=1 timeout="$DEFAULT_TIMEOUT"
-    while getopts "n:t:" opt; do
+    local n="" timeout="$DEFAULT_TIMEOUT" gpu_list=""
+    while getopts "n:t:g:" opt; do
         case "$opt" in
             n) n="$OPTARG" ;;
             t) timeout="$OPTARG" ;;
+            g) gpu_list="$OPTARG" ;;
             *) ;;
         esac
     done
     shift $((OPTIND - 1))
     if [[ "${1:-}" == "--" ]]; then shift; fi
     if [[ "$#" -eq 0 ]]; then
-        echo "usage: excubitor run -n <num_gpus> [-t <giveup_sec>] -- <command...>" >&2
+        echo "usage: excubitor run {-n <num_gpus>|-g <gpu_id>[,<gpu_id>...]} [-t <giveup_sec>] -- <command...>" >&2
         exit 1
     fi
 
-    if ! [[ "$n" =~ ^[0-9]+$ ]] || [[ "$n" -lt 1 ]]; then
-        echo "ERROR: -n must be a positive integer (got '${n}')" >&2
-        exit 1
-    fi
-    if [[ "$n" -gt "$NUM_GPUS_TOTAL" ]]; then
-        echo "ERROR: requested ${n} GPU(s) but this node only has ${NUM_GPUS_TOTAL}" >&2
+    if [[ -n "$gpu_list" && -n "$n" ]]; then
+        echo "ERROR: -n and -g are mutually exclusive -- -g already says exactly which GPU(s) to acquire" >&2
         exit 1
     fi
 
-    acquire_n "$n" "$timeout" || exit 1
+    local -a candidates=()
+    if [[ -n "$gpu_list" ]]; then
+        local -a requested=()
+        IFS=',' read -ra requested <<< "$gpu_list"
+        local seen="," gpu
+        for gpu in "${requested[@]}"; do
+            if ! [[ "$gpu" =~ ^[0-9]+$ ]]; then
+                echo "ERROR: -g GPU ids must be non-negative integers (got '${gpu}')" >&2
+                exit 1
+            fi
+            if [[ "$gpu" -ge "$NUM_GPUS_TOTAL" ]]; then
+                echo "ERROR: GPU ${gpu} does not exist -- this node only has ${NUM_GPUS_TOTAL} (0..$((NUM_GPUS_TOTAL - 1)))" >&2
+                exit 1
+            fi
+            if [[ "$seen" == *",${gpu},"* ]]; then
+                echo "ERROR: GPU ${gpu} requested more than once via -g" >&2
+                exit 1
+            fi
+            seen="${seen}${gpu},"
+        done
+        candidates=("${requested[@]}")
+        n="${#candidates[@]}"
+    else
+        n="${n:-1}"
+        if ! [[ "$n" =~ ^[0-9]+$ ]] || [[ "$n" -lt 1 ]]; then
+            echo "ERROR: -n must be a positive integer (got '${n}')" >&2
+            exit 1
+        fi
+        if [[ "$n" -gt "$NUM_GPUS_TOTAL" ]]; then
+            echo "ERROR: requested ${n} GPU(s) but this node only has ${NUM_GPUS_TOTAL}" >&2
+            exit 1
+        fi
+        mapfile -t candidates < <(gpu_ids)
+    fi
+
+    acquire_n "$n" "$timeout" "${candidates[@]}" || exit 1
     local gpu_arr=("${HELD_GPUS[@]}")
 
     for gpu in "${gpu_arr[@]}"; do

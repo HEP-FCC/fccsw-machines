@@ -135,6 +135,7 @@ GitHub release for that tag. The workflow fails if the tag and
 ```
 excubitor status
 excubitor run -n <num_gpus> [-t <giveup_sec>] -- <command...>
+excubitor run -g <gpu_id>[,<gpu_id>...] [-t <giveup_sec>] -- <command...>
 ```
 
 `excubitor -v`/`--version` and `domestikos -v`/`--version` print the
@@ -142,13 +143,20 @@ installed version (both share one version number, defined in
 `lib/excubitor-common.sh`, since they're always installed/updated
 together).
 
-`-t <giveup_sec>` is a giveup timer for the wait when no GPU is free
-yet (0/omitted = wait forever); it does not bound how long `<command...>`
-itself is allowed to run once GPU(s) are acquired.
+`-t <giveup_sec>` is a giveup timer for the wait when the requested
+GPU(s) aren't free yet (0/omitted = wait forever); it does not bound how
+long `<command...>` itself is allowed to run once GPU(s) are acquired.
+
+`-n <num_gpus>` requests any `<num_gpus>` free GPUs; `-g
+<gpu_id>[,<gpu_id>...]` requests specific GPU(s) by index instead (e.g.
+`-g 0,2`) -- all of them must be free together, or `run` waits/gives up
+on the whole set the same way `-n` does. `-n` and `-g` are mutually
+exclusive; `-n` defaults to 1 if neither is given.
 
 ```
 excubitor run -n 1 -- python train.py
 excubitor run -n 2 -t 600 -- python train_multi.py
+excubitor run -g 0,2 -- python train.py
 ```
 
 The GPU count is always auto-detected via `nvidia-smi -L` and isn't
@@ -175,7 +183,9 @@ you own -- another user's leftovers need `domestikos gc`.
 Both commands have bash tab completion for subcommands and flags
 (installed via `make install`/the RPM into bash-completion's completions
 dir; requires the `bash-completion` package to be installed for it to
-actually load).
+actually load), and man pages (`man excubitor`, `man domestikos`),
+generated at install time from `man/*.1.in` with the current
+`EXCUBITOR_VERSION` substituted in.
 
 ### Admin maintenance
 
