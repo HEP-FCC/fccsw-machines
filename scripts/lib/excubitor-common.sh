@@ -9,7 +9,7 @@ LOCK_DIR="/var/lock/excubitor"
 # Shared by excubitor and domestikos -- both live in this repo and are
 # always installed/updated together (see scripts/Makefile), so one
 # version number for the pair is enough. Bump by hand on notable changes.
-EXCUBITOR_VERSION="0.2.0"
+EXCUBITOR_VERSION="0.2.1"
 
 # Always detect the real GPU count so the same install works unmodified
 # across hosts with different GPU counts (e.g. 4x A100 vs. Tesla T4
@@ -102,6 +102,17 @@ pid_owner() {
     echo "${u:-?}"
 }
 
+# Whether pid $1 is alive, regardless of who owns it. `kill -0` can't be
+# used for this: it fails both when the pid is gone (ESRCH) AND when it
+# exists but belongs to another user (EPERM), so an unprivileged caller
+# can't tell "gone" from "someone else's live process" that way -- it
+# would misreport the latter as STALE. /proc/<pid> existence isn't
+# gated by process ownership, so it works the same for any caller.
+pid_alive() {
+    local pid="$1"
+    [[ -e "/proc/${pid}" ]]
+}
+
 # $1: comma-separated pid list -> comma-separated owners, same order.
 untracked_owners() {
     local pids="$1" pid_arr owners=() pid
@@ -154,7 +165,7 @@ status() {
                 lpid=$(cut -d'|' -f2 "$mf")
                 lsince=$(cut -d'|' -f3 "$mf")
                 lcmd=$(cut -d'|' -f4- "$mf")
-                if kill -0 "$lpid" 2>/dev/null; then
+                if pid_alive "$lpid"; then
                     printf "%-6s %-10s %-12s %-8s %-20s %s\n" "$gpu" "BUSY" "$luser" "$lpid" "$lsince" "$(truncate_field "$lcmd" "$avail")"
                 else
                     printf "%-6s %-10s %-12s %-8s %-20s %s\n" "$gpu" "STALE" "$luser" "$lpid" "$lsince" "(process gone)"
