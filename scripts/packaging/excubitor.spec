@@ -99,6 +99,11 @@ fi
 %{_mandir}/man1/domestikos.1*
 
 %changelog
+* Fri Sep 18 2026 FCC SW Machines <fccsw-machines@cern.ch> - 0.3.0-1
+- domestikos usage now reads from a persistent /var/log/excubitor/usage.log
+  instead of the journal, so records survive a reboot; requires root
+- Shorten the excubitor login banner and show live excubitor status in it
+
 * Wed Aug 05 2026 FCC SW Machines <fccsw-machines@cern.ch> - 0.1.2-1
 - Add bash tab completion for excubitor/domestikos
 
