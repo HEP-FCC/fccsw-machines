@@ -80,18 +80,17 @@ value (default: "24 hours ago"). Does not require root.
 Per\-user job count and total GPU\-time, aggregated from the USAGE
 records
 .B excubitor run
-logs to the journal (tag
-.IR excubitor )
-each time a job releases its GPU(s).
+appends to
+.I /var/log/excubitor/usage.log
+each time a job releases its GPU(s) (also logged to the journal, tag
+.IR excubitor ", for live tailing, but that copy is not what this reads).
 .I since
-is any
-.BR journalctl (1)
-.B \-\-since
-value (default: "7 days ago"). Reading other users' journal entries
-typically requires root or
-.B systemd\-journal
-group membership, so in practice this is an admin\-only view even
-though the command itself doesn't enforce it.
+is anything
+.BR date (1)
+.B \-d
+accepts, e.g. "7 days ago" or "2026\-09\-01" (default: "7 days ago").
+Requires root \(em the log is only readable by root, since job
+commands can contain sensitive\-looking arguments.
 .SH GLOBAL OPTIONS
 .TP
 .BR \-h ", " \-\-help
@@ -105,6 +104,10 @@ Print the installed version.
 .IR /var/lock/excubitor/gpu<N>.lock ", " gpu<N>.meta
 Per\-GPU lock/metadata files; see
 .BR excubitor (1).
+.TP
+.I /var/log/excubitor/usage.log
+Persistent USAGE records read by
+.BR "domestikos usage" .
 .SH EXAMPLES
 .EX
 domestikos check
@@ -115,7 +118,8 @@ sudo domestikos gc
 .SH SEE ALSO
 .BR excubitor (1),
 .BR nvidia\-smi (1),
-.BR journalctl (1)
+.BR journalctl (1),
+.BR date (1)
 .SH BUGS
 Report problems to the administrators via the "FCC SW Machines"
 Mattermost channel: https://mattermost.web.cern.ch/fccsw/channels/fccsw-machines

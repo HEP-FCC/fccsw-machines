@@ -77,6 +77,7 @@ fi
 systemctl daemon-reload || :
 if [ "$1" -eq 0 ]; then
     echo "Note: %{_localstatedir}/lock/excubitor was left in place in case jobs are still using it." >&2
+    echo "Note: %{_localstatedir}/log/excubitor/usage.log was left in place -- delete it by hand if it's no longer wanted." >&2
     echo "Note: current GPU compute mode was left as-is; it will revert to the driver default on the next reboot, since the timer that re-applies it is gone." >&2
 fi
 

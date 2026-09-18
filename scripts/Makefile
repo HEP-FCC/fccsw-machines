@@ -73,6 +73,7 @@ uninstall:
 	rm -f $(BASH_COMPLETION_DIR)/excubitor $(BASH_COMPLETION_DIR)/domestikos
 	rm -f $(MANDIR)/man1/excubitor.1 $(MANDIR)/man1/domestikos.1
 	@echo "Note: $(LOCK_DIR) was left in place in case jobs are still using it."
+	@echo "Note: /var/log/excubitor/usage.log was left in place -- delete it by hand if it's no longer wanted."
 	@echo "Note: current GPU compute mode was left as-is; it will revert to the driver default on the next reboot since the timer is gone."
 
 # Source tarball for `rpmbuild`: just this directory (excubitor/domestikos

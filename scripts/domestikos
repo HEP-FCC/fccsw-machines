@@ -153,6 +153,10 @@ EOF
         [[ -e "$lf" ]] && chmod 666 "$lf" 2>/dev/null || true
     done
 
+    # Same self-heal for the usage log: tmpfiles.d sets 0622 at creation,
+    # but an older install or a manual recreation could leave it wrong.
+    [[ -e "$USAGE_LOG" ]] && chmod 622 "$USAGE_LOG" 2>/dev/null || true
+
     for gpu in $(gpu_ids); do
         if ! is_locked "$gpu"; then
             local bypass_pids; bypass_pids="$(untracked_pids "$gpu")" || true
@@ -221,9 +225,11 @@ cmd_usage() {
 usage: domestikos usage [<since>]
 
 Per-user job count and total GPU-time, aggregated from the USAGE records
-`excubitor run` logs to the journal (tag `excubitor`) each time a job
-releases its GPU(s). <since> is any journalctl --since value (default:
-'7 days ago').
+`excubitor run` appends to /var/log/excubitor/usage.log each time a job
+releases its GPU(s). <since> is anything `date -d` accepts, e.g. "7 days
+ago" or "2026-09-01" (default: '7 days ago'). Requires root -- the log
+is only readable by root, since job commands can contain
+sensitive-looking arguments.
 
 Examples:
   domestikos usage
@@ -232,10 +238,22 @@ EOF
         exit 0
     fi
 
+    require_root
+
     local since="${1:-7 days ago}"
+    local since_epoch
+    if ! since_epoch="$(date -d "$since" +%s 2>/dev/null)"; then
+        echo "ERROR: unrecognized <since> value '${since}' -- try something like '7 days ago' or '2026-09-01'" >&2
+        exit 1
+    fi
+
+    if [[ ! -s "$USAGE_LOG" ]]; then
+        echo "No usage records found since '${since}'."
+        return 0
+    fi
+
     local records
-    # journalctl itself exits 1 when nothing matched -- not a real error.
-    records="$(journalctl -t excubitor --since "${since}" -g '^USAGE\|' -o cat --no-pager 2>/dev/null || true)"
+    records="$(awk -F'|' -v since="$since_epoch" '$1 >= since' "$USAGE_LOG" 2>/dev/null || true)"
 
     if [[ -z "$records" ]]; then
         echo "No usage records found since '${since}'."

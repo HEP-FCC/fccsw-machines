@@ -6,6 +6,14 @@
 
 LOCK_DIR="/var/lock/excubitor"
 
+# Persistent (survives reboot, unlike the journal under its common
+# default of volatile storage) record of USAGE lines `excubitor run`
+# appends on job release; `domestikos usage` reads this, not the
+# journal. Provisioned by tmpfiles.d, mode 0622 -- any user can append
+# (write) but only root can read, since job commands can contain
+# sensitive-looking arguments.
+USAGE_LOG="/var/log/excubitor/usage.log"
+
 # Shared by excubitor and domestikos -- both live in this repo and are
 # always installed/updated together (see scripts/Makefile), so one
 # version number for the pair is enough. Bump by hand on notable changes.

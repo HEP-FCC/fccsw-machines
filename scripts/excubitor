@@ -242,12 +242,17 @@ EOF
             clear_meta "$gpu"
         done
         # Best-effort usage record for `domestikos usage` -- pipe-delimited
-        # so it's trivial to parse back out of `journalctl -o cat`. Never
-        # let a missing/broken logger take down an otherwise-successful job.
+        # so it's trivial to parse back out. Appended both to the journal
+        # (tag excubitor, for live tailing) and to USAGE_LOG (what
+        # `domestikos usage` actually reads -- persistent, unlike the
+        # journal under its common default of volatile storage). Never let
+        # a missing logger/log file take down an otherwise-successful job.
+        local end_epoch; end_epoch="$(date +%s)"
+        local duration=$(( end_epoch - start_epoch ))
         if command -v logger >/dev/null 2>&1; then
-            local duration=$(( $(date +%s) - start_epoch ))
             logger -t excubitor "USAGE|${USER}|${cvd}|${duration}|${run_cmd}" 2>/dev/null || true
         fi
+        printf '%s|%s|%s|%s|%s\n' "$end_epoch" "${USER}" "${cvd}" "${duration}" "${run_cmd}" >> "$USAGE_LOG" 2>/dev/null || true
         echo "[excubitor] released GPU(s): ${cvd}"
     }
     trap cleanup EXIT INT TERM

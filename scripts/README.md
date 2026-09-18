@@ -45,6 +45,12 @@ so without it the directory would vanish on reboot and `excubitor` would
 refuse to run until someone reinstalled by hand. `excubitor` refuses to
 run until this has been done at least once.
 
+The same rule also creates `/var/log/excubitor/usage.log` (mode `0622`:
+any user can append, only root can read), the persistent store behind
+`domestikos usage` (see below) — `/var/log` isn't a tmpfs, so this one
+doesn't need re-creating on every boot, but provisioning it here keeps
+both files in one place and repairs it if it's ever removed by hand.
+
 `make install` also installs `systemd/domestikos.service` +
 `systemd/domestikos.timer` and starts the timer, which runs `domestikos
 check` once now, again ~1 minute after every boot, and every 5 minutes
@@ -214,16 +220,19 @@ domestikos.service` query yourself. Doesn't require root (though
 
 ```
 domestikos usage                # per-user job count + total GPU-time, last 7 days
-domestikos usage "30 days ago"  # or any journalctl --since value
+domestikos usage "30 days ago"  # or anything `date -d` accepts
 ```
 
-Every `excubitor run` logs a `USAGE` record (tag `excubitor`, e.g. via
-`journalctl -t excubitor`) when a job releases its GPU(s), recording the
-user, GPU(s), duration, and command. `domestikos usage` aggregates those
-into a per-user table of job count and total GPU-time, plus a grand
-total. Reading other users' journal entries typically requires root or
-`systemd-journal` group membership, so in practice this is an admin-only
-view even though the command itself doesn't enforce it.
+Every `excubitor run` appends a `USAGE` record to
+`/var/log/excubitor/usage.log` when a job releases its GPU(s), recording
+the timestamp, user, GPU(s), duration, and command (also logged to the
+journal, tag `excubitor`, for live tailing, but `domestikos usage` reads
+the log file, not the journal -- the file survives a reboot, which the
+journal doesn't under its common default of volatile storage).
+`domestikos usage` aggregates those into a per-user table of job count
+and total GPU-time, plus a grand total. Requires root: the log file is
+only readable by root (any user can append to it, but not read it back),
+since job commands can contain sensitive-looking arguments.
 
 ### Support
 
