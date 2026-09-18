@@ -9,24 +9,12 @@ cat <<'EOF'
 
 ================================================================
  Shared GPUs -- use excubitor, don't launch CUDA jobs directly.
+   excubitor run -n <N> [-t <secs>] -- <command>   (or -g <id>[,<id>...])
+ man excubitor | Problems: Mattermost "FCC SW Machines"
 ================================================================
-
-  excubitor status                                # see what's free
-  excubitor run -n <N> [-t <secs>] -- <command>   # run using any N GPUs
-  excubitor run -g <id>[,<id>...] [-t <secs>] -- <command>  # specific GPU(s)
-
-  Examples:
-    excubitor run -n 1 -- python train.py
-    excubitor run -g 0,2 -- python train.py
-
-  Bypassing it on a free GPU can make a later `excubitor run` land on
-  the same one and fail to start. Use excubitor every time.
-
-  (excubitor: the Byzantine palace guard -- it stands watch over who
-  holds which GPU.)
-
-  Problems? Contact the administrators on Mattermost, "FCC SW Machines":
-    https://mattermost.web.cern.ch/fccsw/channels/fccsw-machines
-================================================================
-
 EOF
+
+command -v excubitor >/dev/null 2>&1 && excubitor status 2>/dev/null
+
+echo "================================================================"
+echo
